@@ -145,7 +145,7 @@ async function fetchLTP(symbol) {
  * Fetch historical daily closes using Yahoo Finance.
  * Falls back to simulation if the request fails.
  */
-async function fetchHistoricalCloses(symbol, days = 30) {
+async function fetchHistoricalCloses(symbol, days = 150) {
   if (isMockMode) {
     return generateSimulatedCandles(symbol, days);
   }

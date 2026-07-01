@@ -93,8 +93,8 @@ async function getSymbolData(symbol) {
   try {
     // Seed historical closes only once (or rarely) since they barely change intraday
     let closes = entry?.closes;
-    if (!closes || closes.length < 15) {
-      closes = await fetchHistoricalCloses(symbol, 30);
+    if (!closes || closes.length < 50) {
+      closes = await fetchHistoricalCloses(symbol, 150);
     }
 
     const quote = await fetchLTP(symbol);
@@ -103,7 +103,7 @@ async function getSymbolData(symbol) {
       if (!closes || closes.length === 0) {
         closes = [quote.ltp];
       } else {
-        closes = [...closes, quote.ltp].slice(-100); // keep last 100 points
+        closes = [...closes, quote.ltp].slice(-150); // keep last 150 points
       }
     }
 

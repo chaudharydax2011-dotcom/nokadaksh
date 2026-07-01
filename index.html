@@ -114,6 +114,11 @@ if ('serviceWorker' in navigator) {
     font-weight: 700;
     letter-spacing: 0.5px;
   }
+  .market-status-tag.closed {
+    color: var(--red);
+    border-color: var(--red);
+    background: rgba(239, 68, 68, 0.15);
+  }
   .connection-status-tag {
     font-size: 11px;
     font-weight: 700;
@@ -744,7 +749,7 @@ if ('serviceWorker' in navigator) {
     </div>
     <div class="ribbon-box">
       <span class="title">MARKET STATUS</span>
-      <span class="market-status-tag">OPEN</span>
+      <span id="marketStatus" class="market-status-tag">OPEN</span>
     </div>
   </div>
 
@@ -982,6 +987,48 @@ function showLoader(show, msg = 'Connecting to Signal Server...') {
   else loader.classList.remove('active');
 }
 
+function checkMarketStatus() {
+  const options = { timeZone: 'Asia/Kolkata', hour12: false, weekday: 'short', hour: '2-digit', minute: '2-digit' };
+  const formatter = new Intl.DateTimeFormat('en-US', options);
+  const parts = formatter.formatToParts(new Date());
+  
+  let weekday = '';
+  let hour = 0;
+  let minute = 0;
+  
+  for (const part of parts) {
+    if (part.type === 'weekday') weekday = part.value;
+    if (part.type === 'hour') hour = parseInt(part.value, 10);
+    if (part.type === 'minute') minute = parseInt(part.value, 10);
+  }
+  
+  if (weekday === 'Sat' || weekday === 'Sun') {
+    return 'CLOSED';
+  }
+  
+  const currentMinutes = hour * 60 + minute;
+  const startMinutes = 9 * 60 + 15; // 9:15 AM
+  const endMinutes = 15 * 60 + 30;  // 3:30 PM
+  
+  if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+    return 'OPEN';
+  } else {
+    return 'CLOSED';
+  }
+}
+
+function updateMarketStatusHTML() {
+  const statusEl = document.getElementById('marketStatus');
+  if (!statusEl) return;
+  const status = checkMarketStatus();
+  statusEl.textContent = status;
+  if (status === 'OPEN') {
+    statusEl.className = 'market-status-tag';
+  } else {
+    statusEl.className = 'market-status-tag closed';
+  }
+}
+
 function updateConnectionStatus(isOnline) {
   const badge = document.getElementById('connectionStatusBadge');
   if (!badge) return;
@@ -995,6 +1042,7 @@ function updateConnectionStatus(isOnline) {
 }
 
 async function tick(showSpinner = false) {
+  updateMarketStatusHTML();
   if (showSpinner) showLoader(true, 'Fetching latest stock signals...');
   const period = document.getElementById('rsiPeriod').value;
   const banner = document.getElementById('errBanner');
