@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSE Stocks RSI Signal Sheet (Live)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#030914">
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('Service Worker registered!'))
+      .catch(err => console.error('Service Worker registration failed:', err));
+  });
+}
+</script>
+<style>
+  :root {
+    --bg: #030914;
+    --panel: #08101d;
+    --border: #16273a;
+    --text: #ffffff;
+    --text-muted: #8ba2b8;
+    --accent: #29b6f6;
+    --green: #22c55e;
+    --green-bg: rgba(34, 197, 94, 0.1);
+    --yellow: #eab308;
+    --orange: #f97316;
+    --red: #ef4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  /* Header Section */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 15px;
+    padding: 10px 0;
+  }
+  .header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .live-badge {
+    background: #ff2a2a;
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    letter-spacing: 1px;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  /* Status Ribbon */
+  .ribbon {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+  }
+  .ribbon-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .ribbon-box .title {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .ribbon-box .value {
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .market-status-tag {
+    color: var(--green);
+    border: 1px solid var(--green);
+    background: var(--green-bg);
+    padding: 3px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .connection-status-tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+  .connection-status-tag.online {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+  .connection-status-tag.offline {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    animation: statusPulse 1.5s infinite;
+  }
+  @keyframes statusPulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+  }
+
+  /* Top Widgets Grid */
+  .top-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 15px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+  }
+  .panel-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  /* Indicator Widget */
+  .indicator-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+  }
+  .indicator-info {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .indicator-name {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--green);
+  }
+  .sparkline-container {
+    width: 60%;
+    height: 60px;
+  }
+  canvas.sparkline {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Guide Widget Table */
+  .guide-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .guide-table th {
+    text-align: left;
+    color: var(--text-muted);
+    padding-bottom: 6px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .guide-table td {
+    padding: 5px 0;
+  }
+  .guide-table tr:not(:last-child) td {
+    border-bottom: 1px dashed rgba(22, 39, 58, 0.4);
+  }
+  .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .sig-label {
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Add Symbol Form */
+  .adder-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 18px;
+  }
+  .adder-bar input {
+    background: #040a14;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    flex: 1;
+    outline: none;
+    font-family: inherit;
+  }
+  .adder-bar input:focus {
+    border-color: var(--accent);
+  }
+  .adder-bar button {
+    background: var(--accent);
+    color: #030914;
+    border: none;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    font-family: inherit;
+  }
+  .adder-bar button:hover { opacity: 0.9; }
+  .adder-bar button:disabled { background: var(--text-muted); cursor: not-allowed; }
+
+  /* Controls Selector row */
+  .controls-row {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+    color: var(--text-muted);
+    align-items: center;
+  }
+  .controls-row select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    outline: none;
+    font-family: inherit;
+  }
+
+  /* Main Workspace Split Grid */
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 15px;
+    align-items: start;
+  }
+
+  /* Tables Styling */
+  table.main-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  table.main-table th {
+    background: #0d1726;
+    color: #cfe0ff;
+    font-weight: 600;
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  table.main-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  table.main-table tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .symbol-code {
+    color: var(--green);
+    font-weight: 600;
+  }
+  .color-bar {
+    height: 22px;
+    width: 100%;
+    border-radius: 4px;
+  }
+  .delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--red);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    transition: background 0.2s;
+  }
+  .delete-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+  }
+
+  /* Lowest RSI Sidebar Panel */
+  .lowest-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .lowest-table th {
+    text-align: left;
+    color: var(--text-muted);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .lowest-table td {
+    padding: 8px 0;
+    border-bottom: 1px dashed rgba(22, 39, 58, 0.4);
+  }
+  .lowest-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* Bottom Grid Notes & Summary */
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 15px;
+  }
+  .notes-panel ul {
+    list-style-type: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .notes-panel ul li::before {
+    content: "• ";
+    color: var(--yellow);
+    font-weight: bold;
+  }
+  .notes-sub-list {
+    margin-left: 20px;
+    margin-top: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .notes-footer {
+    margin-top: 15px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* Summary Table */
+  .summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .summary-table th {
+    text-align: left;
+    color: var(--text-muted);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .summary-table td {
+    padding: 8px 6px;
+    border-bottom: 1px dashed rgba(22, 39, 58, 0.4);
+  }
+  .summary-table tr.total-row td {
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  /* Footer */
+  .footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 11px;
+    border-top: 1px solid var(--border);
+    padding-top: 15px;
+    margin-top: 10px;
+  }
+  .footer-live-badge {
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .footer-live-badge .badge-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* Error Banner */
+  .err-banner {
+    background: #3a1010;
+    border: 1px solid var(--red);
+    color: #fca5a5;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    display: none;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .retry-btn {
+    background: var(--red);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.3);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .retry-btn:hover {
+    background: #b91c1c;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  }
+
+  /* Loading Spinner Styles */
+  .loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(3, 9, 20, 0.7);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 15px;
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  .loading-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--border);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .loading-text {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 10px rgba(255,255,255,0.2);
+  }
+
+  /* Mobile compatibility media queries */
+  .tab-nav {
+    display: none;
+  }
+
+  @media (max-width: 768px) {
+    body {
+      padding: 8px;
+    }
+    .wrap {
+      max-width: 100%;
+      margin: 0;
+      padding: 4px;
+    }
+    .header h1 {
+      font-size: 18px !important;
+    }
+    .live-badge {
+      font-size: 9px;
+      padding: 2px 6px;
+    }
+    
+    /* Sleek tab nav controls on mobile */
+    .tab-nav {
+      display: flex;
+      background: #08101d;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px;
+      gap: 3px;
+      margin: 10px 0 15px 0;
+      width: 100%;
+    }
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 8px 3px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 17px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #030914;
+      box-shadow: 0 2px 6px rgba(0, 255, 102, 0.2);
+    }
+
+    /* Tab-based visibility logic */
+    body:not(.tab-signals) .signals-only,
+    body:not(.tab-charts) .charts-only,
+    body:not(.tab-stats) .stats-only {
+      display: none !important;
+    }
+
+    .ribbon, .top-grid, .workspace-grid, .bottom-grid {
+      grid-template-columns: 1fr !important;
+      gap: 12px;
+    }
+    .indicator-panel {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .sparkline-container {
+      width: 100%;
+      height: 60px;
+    }
+    .adder-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .adder-bar input {
+      font-size: 12px;
+      padding: 10px;
+    }
+    .adder-bar button {
+      padding: 10px;
+      font-size: 12px;
+    }
+    .controls-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 12px;
+    }
+    .controls-row span {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .controls-row select {
+      width: 100px;
+    }
+    #sourceLabel {
+      margin-left: 0 !important;
+      font-size: 11px;
+    }
+    
+    /* Convert table to responsive Cards on mobile */
+    .main-table, .main-table thead, .main-table tbody, .main-table th, .main-table td, .main-table tr {
+      display: block;
+    }
+    .main-table thead {
+      display: none; /* Hide header row */
+    }
+    .main-table tr {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      padding: 12px 14px;
+      position: relative;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .main-table td {
+      border: none;
+      padding: 8px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(22, 39, 58, 0.5);
+    }
+    .main-table td:last-child {
+      border-bottom: none;
+      padding-top: 10px;
+      justify-content: center;
+    }
+    .main-table td::before {
+      content: attr(data-label);
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .main-table td .color-bar {
+      width: 70px;
+      height: 16px;
+    }
+    .main-table td .delete-btn {
+      width: 100%;
+      padding: 6px;
+      border-radius: 4px;
+      background: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .main-table td .delete-btn::after {
+      content: " Delete Stock";
+    }
+
+    /* Convert Lowest RSI Table to cards */
+    .lowest-table, .lowest-table thead, .lowest-table tbody, .lowest-table th, .lowest-table td, .lowest-table tr {
+      display: block;
+    }
+    .lowest-table thead {
+      display: none;
+    }
+    .lowest-table tr {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 0;
+    }
+    .lowest-table tr:last-child {
+      border-bottom: none;
+    }
+    .lowest-table td {
+      border: none;
+      padding: 4px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+    .lowest-table td::before {
+      content: attr(data-label);
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .lowest-table td .color-bar {
+      width: 50px;
+      height: 10px;
+    }
+
+    .footer {
+      flex-direction: column;
+      gap: 10px;
+      text-align: center;
+      font-size: 11px;
+    }
+  }
+</style>
+</head>
+<body class="tab-signals">
+<!-- Loading Screen Overlay -->
+<div id="loadingOverlay" class="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Connecting to Signal Server...</div>
+</div>
+
+<div class="wrap">
+  <!-- Header Banner -->
+  <div class="header">
+    <h1>NSE STOCKS RSI SIGNAL SHEET</h1>
+    <span class="live-badge">LIVE</span>
+  </div>
+
+  <!-- Mobile Tab Navigation Bar -->
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="signals" onclick="switchTab('signals')">📊 Signals</button>
+    <button class="tab-btn" data-tab="charts" onclick="switchTab('charts')">📈 Charts</button>
+    <button class="tab-btn" data-tab="stats" onclick="switchTab('stats')">📋 Stats</button>
+  </div>
+
+  <!-- Status Ribbon -->
+  <div class="ribbon">
+    <div class="ribbon-box">
+      <span class="title">LAST UPDATE</span>
+      <span id="lastUpdate" class="value">--</span>
+    </div>
+    <div class="ribbon-box">
+      <span class="title">SERVER STATUS</span>
+      <span id="connectionStatusBadge" class="connection-status-tag offline">CONNECTING</span>
+    </div>
+    <div class="ribbon-box">
+      <span class="title">MARKET STATUS</span>
+      <span class="market-status-tag">OPEN</span>
+    </div>
+  </div>
+
+  <!-- Top Widget Grid (Indicator & Guide) -->
+  <div class="top-grid">
+    <div class="panel indicator-panel charts-only">
+      <div class="indicator-info">
+        <span class="panel-title">INDICATOR</span>
+        <span class="indicator-name">RSI (14)</span>
+      </div>
+      <div class="sparkline-container">
+        <canvas id="niftySparkline" class="sparkline" height="60" width="300"></canvas>
+      </div>
+    </div>
+    <div class="panel stats-only">
+      <span class="panel-title">RSI SIGNAL GUIDE</span>
+      <table class="guide-table">
+        <thead>
+          <tr>
+            <th>RSI RANGE</th>
+            <th>SIGNAL</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>&gt; 70</td>
+            <td><span class="sig-label"><span class="dot" style="background:var(--red)"></span>STRONG SELL</span></td>
+          </tr>
+          <tr>
+            <td>60.01 - 70</td>
+            <td><span class="sig-label"><span class="dot" style="background:var(--orange)"></span>SELL</span></td>
+          </tr>
+          <tr>
+            <td>35 - 60</td>
+            <td><span class="sig-label"><span class="dot" style="background:var(--yellow)"></span>HOLD</span></td>
+          </tr>
+          <tr>
+            <td>30 - 34.99</td>
+            <td><span class="sig-label"><span class="dot" style="background:#00ff66; box-shadow: 0 0 8px #00ff66;"></span>BUY</span></td>
+          </tr>
+          <tr>
+            <td>&lt; 30</td>
+            <td><span class="sig-label"><span class="dot" style="background:#15803d;"></span>STRONG BUY</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Symbol Form -->
+  <div class="adder-bar signals-only">
+    <input type="text" id="newSymbol" placeholder="Enter NSE Ticker Symbol (e.g. RELIANCE, TCS, INFY)">
+    <button id="addSymbolBtn">Add Stock/ETF</button>
+  </div>
+
+  <!-- Error display block -->
+  <div id="errBanner" class="err-banner">
+    <span id="errText"></span>
+    <button id="retryBtn" onclick="tick(true)" class="retry-btn">Retry Connection</button>
+  </div>
+
+    <!-- Table Controllers -->
+    <div class="controls-row signals-only">
+      <span>Refresh Interval:</span>
+      <select id="refreshRate">
+        <option value="5000">5 sec</option>
+        <option value="15000" selected>15 sec</option>
+        <option value="30000">30 sec</option>
+        <option value="60000">1 min</option>
+      </select>
+      <span>RSI Period:</span>
+      <select id="rsiPeriod">
+        <option value="7">7</option>
+        <option value="9">9</option>
+        <option value="14" selected>14</option>
+        <option value="21">21</option>
+      </select>
+      <span>Backend URL:</span>
+      <input type="text" id="backendUrlInput" placeholder="http://localhost:4000" style="background:var(--panel); border:1px solid var(--border); color:#fff; padding:4px 8px; border-radius:4px; font-size:11px; width:170px; font-family:inherit;">
+      <span style="margin-left: auto;" id="sourceLabel">Backend: Connecting...</span>
+    </div>
+
+  <!-- Split Grid (Main Table + Lowest RSI Panel) -->
+  <div class="workspace-grid">
+    <!-- Main Table -->
+    <div style="overflow-x: auto;" class="signals-only">
+      <table class="main-table">
+        <thead>
+          <tr>
+            <th style="width: 50px;">No.</th>
+            <th>NSE Code</th>
+            <th>RSI (14)</th>
+            <th>LTP</th>
+            <th>Signal</th>
+            <th style="width: 110px;">Signal Color</th>
+            <th style="width: 70px; text-align: center;">Action</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Right Side Panel Column -->
+    <div class="side-panel-column" style="display: flex; flex-direction: column; gap: 15px; width: 100%;">
+      <!-- Lowest RSI Panel -->
+      <div class="panel signals-only">
+        <span class="panel-title">LOWEST RSI (OVERSOLD TRENDS)</span>
+        <table class="lowest-table">
+          <thead>
+            <tr>
+              <th>NSE Code</th>
+              <th>RSI</th>
+              <th>Signal</th>
+              <th style="width: 80px;">Color</th>
+            </tr>
+          </thead>
+          <tbody id="lowestTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Nifty 50 Index Panel -->
+      <div class="panel charts-only" style="display: flex; flex-direction: column; gap: 8px;">
+        <span class="panel-title">INDEX SUMMARY</span>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 700; font-size: 16px; color: var(--accent);">NIFTY 50</span>
+          <span id="niftyLtp" style="font-weight: 700; font-size: 18px; color: #fff;">--</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+          <span style="color: var(--text-muted);">Change Pct:</span>
+          <span id="niftyChange" style="font-weight: 600;">--</span>
+        </div>
+        <!-- Mini Sparkline for Nifty Index -->
+        <div style="height: 45px; margin-top: 5px; width: 100%;">
+          <canvas id="niftyIndexSparkline" height="45" style="width: 100%; height: 100%;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detailed Interactive Chart Panel -->
+  <div class="panel charts-only" style="width: 100%; height: 350px; padding: 15px;">
+    <span class="panel-title">NIFTY 50 INDEX HISTORICAL CHART (30 DAYS)</span>
+    <div style="height: calc(100% - 25px); width: 100%; position: relative;">
+      <canvas id="niftyDetailedCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+    </div>
+  </div>
+
+  <!-- Bottom Details Grid (Notes & Summary) -->
+  <div class="bottom-grid">
+    <!-- Notes Panel -->
+    <div class="panel notes-panel stats-only">
+      <span class="panel-title">NOTES:</span>
+      <ul>
+        <li>RSI is used as one of the generating signals.</li>
+        <li>
+          Signal are based on RSI range rules:
+          <div class="notes-sub-list">
+            <span>&gt; 70 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- STRONG SELL</span>
+            <span>60.01 - 70 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- SELL</span>
+            <span>35.00 - 60 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- HOLD</span>
+            <span>30.00 - 34.99 &nbsp;&nbsp;- BUY</span>
+            <span>&lt; 30 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- STRONG BUY</span>
+          </div>
+        </li>
+      </ul>
+      <div class="notes-footer">This is used for educational and informational purpose only.</div>
+    </div>
+
+    <!-- Summary Panel -->
+    <div class="panel stats-only">
+      <span class="panel-title">SIGNAL SUMMARY</span>
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th>SIGNAL</th>
+            <th>COUNT</th>
+            <th>%</th>
+          </tr>
+        </thead>
+        <tbody id="summaryTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>Disclaimer: This is an automated system generated report. Please consult your financial advisor before making any investment decisions.</span>
+    <span class="footer-live-badge"><span class="badge-dot"></span>MARKET DATA LIVE</span>
+  </div>
+</div>
+
+<script>
+function switchTab(tabName) {
+  document.body.className = 'tab-' + tabName;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabName);
+  });
+}
+
+let BACKEND_URL = '__BACKEND_URL_PLACEHOLDER__';
+if (BACKEND_URL.startsWith('__BACKEND_URL')) {
+  BACKEND_URL = localStorage.getItem('backend_url') || '';
+}
+let timer = null;
+let cachedData = [];
+
+function showMessage(msg, isError = true) {
+  const banner = document.getElementById('errBanner');
+  const txt = document.getElementById('errText');
+  if (!banner || !txt) return;
+  banner.style.display = 'flex';
+  txt.textContent = msg;
+  if (isError) {
+    banner.style.background = '#3a1010';
+    banner.style.borderColor = 'var(--red)';
+    banner.style.color = '#fca5a5';
+  } else {
+    banner.style.background = '#10351a';
+    banner.style.borderColor = 'var(--green)';
+    banner.style.color = '#a3fca5';
+  }
+  if (!isError) {
+    setTimeout(() => {
+      banner.style.display = 'none';
+    }, 4500);
+  }
+}
+
+function showLoader(show, msg = 'Connecting to Signal Server...') {
+  const loader = document.getElementById('loadingOverlay');
+  if (!loader) return;
+  const textEl = loader.querySelector('.loading-text');
+  if (textEl) textEl.textContent = msg;
+  if (show) loader.classList.add('active');
+  else loader.classList.remove('active');
+}
+
+function updateConnectionStatus(isOnline) {
+  const badge = document.getElementById('connectionStatusBadge');
+  if (!badge) return;
+  if (isOnline) {
+    badge.textContent = 'ONLINE';
+    badge.className = 'connection-status-tag online';
+  } else {
+    badge.textContent = 'OFFLINE';
+    badge.className = 'connection-status-tag offline';
+  }
+}
+
+async function tick(showSpinner = false) {
+  if (showSpinner) showLoader(true, 'Fetching latest stock signals...');
+  const period = document.getElementById('rsiPeriod').value;
+  const banner = document.getElementById('errBanner');
+  const sourceLabel = document.getElementById('sourceLabel');
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/quotes?period=${period}`);
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const json = await res.json();
+    
+    updateConnectionStatus(true);
+    
+    if (banner && (banner.style.background === 'rgb(58, 16, 16)' || banner.style.background === '#3a1010' || banner.style.display === 'flex')) {
+      banner.style.display = 'none';
+    }
+
+    if (sourceLabel) {
+      if (json.isMock) {
+        sourceLabel.textContent = 'Data Mode: SIMULATED (API Offline)';
+        sourceLabel.style.color = 'var(--orange)';
+      } else {
+        sourceLabel.textContent = 'Data Mode: LIVE (Yahoo Finance)';
+        sourceLabel.style.color = 'var(--green)';
+      }
+    }
+
+    cachedData = json.data;
+    renderAll(json.data);
+    renderNiftyWidget(json.nifty);
+  } catch (err) {
+    updateConnectionStatus(false);
+    showMessage(`Cannot reach backend at ${BACKEND_URL}. Ensure "node server.js" is running. (${err.message})`, true);
+    if (sourceLabel) {
+      sourceLabel.textContent = 'Data Mode: OFFLINE';
+      sourceLabel.style.color = 'var(--red)';
+    }
+  } finally {
+    if (showSpinner) showLoader(false);
+  }
+}
+
+function renderAll(rows) {
+  renderMainTable(rows);
+  renderLowestRsiPanel(rows);
+  renderSummary(rows);
+  renderSparklineCanvas(rows);
+}
+
+function renderNiftyWidget(nifty) {
+  const ltpEl = document.getElementById('niftyLtp');
+  const changeEl = document.getElementById('niftyChange');
+  if (!ltpEl || !changeEl) return;
+
+  if (!nifty || nifty.ltp === null) {
+    ltpEl.textContent = '--';
+    changeEl.textContent = '--';
+    changeEl.style.color = 'var(--text-muted)';
+    return;
+  }
+
+  ltpEl.textContent = '₹' + nifty.ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sign = nifty.changePct >= 0 ? '+' : '';
+  changeEl.textContent = `${sign}${nifty.changePct.toFixed(2)}%`;
+  changeEl.style.color = nifty.changePct >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // Draw Nifty 50 Index sparkline
+  const canvas = document.getElementById('niftyIndexSparkline');
+  if (canvas && nifty.closes && nifty.closes.length >= 2) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const closes = nifty.closes;
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const range = max - min;
+
+    ctx.beginPath();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = nifty.changePct >= 0 ? '#22c55e' : '#ef4444';
+
+    const step = canvas.width / (closes.length - 1);
+    for (let i = 0; i < closes.length; i++) {
+      const x = i * step;
+      const y = canvas.height - ((closes[i] - min) / (range || 1)) * (canvas.height - 10) - 5;
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+
+    // Subtle gradient below index sparkline
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    if (nifty.changePct >= 0) {
+      grad.addColorStop(0, 'rgba(34, 197, 94, 0.12)');
+    } else {
+      grad.addColorStop(0, 'rgba(239, 68, 68, 0.12)');
+    }
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.lineTo(canvas.width, canvas.height);
+    ctx.lineTo(0, canvas.height);
+    ctx.fillStyle = grad;
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Draw detailed large chart
+  if (nifty.closes) {
+    renderDetailedChart(nifty.closes, nifty.changePct);
+  }
+}
+
+function renderDetailedChart(closes, changePct) {
+  const canvas = document.getElementById('niftyDetailedCanvas');
+  if (!canvas) return;
+  
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  
+  const width = rect.width;
+  const height = rect.height;
+  
+  ctx.clearRect(0, 0, width, height);
+  
+  if (!closes || closes.length < 2) {
+    ctx.fillStyle = 'var(--text-muted)';
+    ctx.font = '13px Inter';
+    ctx.textAlign = 'center';
+    ctx.fillText('No historical chart data available', width / 2, height / 2);
+    return;
+  }
+  
+  const paddingLeft = 50;
+  const paddingRight = 15;
+  const paddingTop = 15;
+  const paddingBottom = 25;
+  
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+  
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
+  
+  // 1. Draw Grid Lines & Y-Axis Labels
+  ctx.strokeStyle = '#122235';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = 'var(--text-muted)';
+  ctx.font = '10px Inter';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  
+  const yTicks = 4;
+  for (let i = 0; i <= yTicks; i++) {
+    const val = min + (range * i) / yTicks;
+    const y = paddingTop + chartHeight - (chartHeight * i) / yTicks;
+    
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, y);
+    ctx.lineTo(width - paddingRight, y);
+    ctx.stroke();
+    
+    ctx.fillText(Math.round(val).toLocaleString('en-IN'), paddingLeft - 8, y);
+  }
+  
+  // 2. Draw X-Axis Labels
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const xTicks = 4;
+  const stepIdx = Math.floor((closes.length - 1) / xTicks);
+  for (let i = 0; i <= xTicks; i++) {
+    const idx = Math.min(i * stepIdx, closes.length - 1);
+    const x = paddingLeft + (chartWidth * idx) / (closes.length - 1);
+    
+    let label = idx === closes.length - 1 ? 'Today' : `T-${closes.length - 1 - idx}d`;
+    ctx.fillText(label, x, paddingTop + chartHeight + 6);
+  }
+  
+  // 3. Plot Line
+  ctx.beginPath();
+  const stepX = chartWidth / (closes.length - 1);
+  for (let i = 0; i < closes.length; i++) {
+    const x = paddingLeft + i * stepX;
+    const y = paddingTop + chartHeight - ((closes[i] - min) / range) * chartHeight;
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  
+  const trendColor = changePct >= 0 ? '#00ff66' : '#ef4444';
+  ctx.strokeStyle = trendColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Fill Area under the line
+  ctx.lineTo(paddingLeft + chartWidth, paddingTop + chartHeight);
+  ctx.lineTo(paddingLeft, paddingTop + chartHeight);
+  const grad = ctx.createLinearGradient(0, paddingTop, 0, paddingTop + chartHeight);
+  if (changePct >= 0) {
+    grad.addColorStop(0, 'rgba(0, 255, 102, 0.14)');
+  } else {
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0.14)');
+  }
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = grad;
+  ctx.closePath();
+  ctx.fill();
+}
+
+function renderMainTable(rows) {
+  const tbody = document.getElementById('tableBody');
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No stocks in list. Add a symbol above!</td></tr>`;
+    return;
+  }
+  
+  tbody.innerHTML = rows.map((r, i) => `
+    <tr>
+      <td data-label="No.">${i + 1}</td>
+      <td data-label="NSE Code" class="symbol-code">NSE: ${r.symbol}</td>
+      <td data-label="RSI (14)" style="font-weight: 500;">${r.rsi !== null ? r.rsi.toFixed(2) : '—'}</td>
+      <td data-label="LTP" style="font-weight: 500;">${r.ltp !== null ? '₹' + r.ltp.toFixed(2) : '—'}</td>
+      <td data-label="Signal">
+        <span class="sig-label">
+          <span class="dot" style="background:${r.color}; ${r.color === '#00ff66' ? 'box-shadow: 0 0 8px #00ff66;' : ''}"></span>
+          ${r.signal}
+        </span>
+      </td>
+      <td data-label="Color">
+        <div class="color-bar" style="background:${r.color}; ${r.color === '#00ff66' ? 'box-shadow: 0 0 10px rgba(0, 255, 102, 0.5);' : ''}"></div>
+      </td>
+      <td data-label="Action" style="text-align: center;">
+        <button class="delete-btn" onclick="deleteSymbol('${r.symbol}')" title="Remove Symbol">×</button>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleString('en-GB');
+}
+
+function renderLowestRsiPanel(rows) {
+  const tbody = document.getElementById('lowestTableBody');
+  const sorted = [...rows]
+    .filter(r => r.rsi !== null)
+    .sort((a, b) => a.rsi - b.rsi)
+    .slice(0, 5);
+
+  if (sorted.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:10px;">—</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(r => `
+    <tr>
+      <td data-label="NSE Code" class="symbol-code">NSE: ${r.symbol}</td>
+      <td data-label="RSI" style="font-weight: 600; color: #fff;">${r.rsi.toFixed(2)}</td>
+      <td data-label="Signal">
+        <span class="sig-label" style="font-size: 11px;">
+          <span class="dot" style="width:6px; height:6px; background:${r.color}; ${r.color === '#00ff66' ? 'box-shadow: 0 0 8px #00ff66;' : ''}"></span>
+          ${r.signal}
+        </span>
+      </td>
+      <td data-label="Color">
+        <div class="color-bar" style="background:${r.color}; height: 12px; border-radius: 2px; ${r.color === '#00ff66' ? 'box-shadow: 0 0 10px rgba(0, 255, 102, 0.5);' : ''}"></div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function renderSummary(rows) {
+  const tbody = document.getElementById('summaryTableBody');
+  const counts = {
+    'STRONG SELL': 0,
+    'SELL': 0,
+    'HOLD': 0,
+    'BUY': 0,
+    'STRONG BUY': 0
+  };
+  const colors = {
+    'STRONG SELL': 'var(--red)',
+    'SELL': 'var(--orange)',
+    'HOLD': 'var(--yellow)',
+    'BUY': '#00ff66',
+    'STRONG BUY': '#15803d'
+  };
+
+  let total = 0;
+  rows.forEach(r => {
+    if (r.signal in counts) {
+      counts[r.signal]++;
+      total++;
+    }
+  });
+
+  const categories = ['STRONG SELL', 'SELL', 'HOLD', 'BUY', 'STRONG BUY'];
+  let html = categories.map(cat => {
+    const count = counts[cat];
+    const pct = total > 0 ? (count / total * 100).toFixed(2) : '0.00';
+    return `
+      <tr>
+        <td>
+          <span class="sig-label">
+            <span class="dot" style="background:${colors[cat]}; ${colors[cat] === '#00ff66' ? 'box-shadow: 0 0 8px #00ff66;' : ''}"></span>
+            ${cat}
+          </span>
+        </td>
+        <td style="font-weight: 600;">${count}</td>
+        <td style="color: var(--text-muted); font-weight: 500;">${pct}%</td>
+      </tr>
+    `;
+  }).join('');
+
+  html += `
+    <tr class="total-row">
+      <td>TOTAL</td>
+      <td>${total}</td>
+      <td>100.00%</td>
+    </tr>
+  `;
+  tbody.innerHTML = html;
+}
+
+function renderSparklineCanvas(rows) {
+  // Let's use NIFTYBEES closes for the sparkline trend. If not found, use the first symbol with closes.
+  let target = rows.find(r => r.symbol === 'NIFTYBEES');
+  if (!target || !target.closes || target.closes.length === 0) {
+    target = rows.find(r => r.closes && r.closes.length > 0);
+  }
+
+  if (!target || !target.closes || target.closes.length < 2) return;
+
+  const canvas = document.getElementById('niftySparkline');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  const closes = target.closes;
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min;
+  
+  ctx.beginPath();
+  ctx.lineWidth = 1.75;
+  ctx.strokeStyle = '#22c55e'; // glowing green
+  
+  const step = canvas.width / (closes.length - 1);
+  for (let i = 0; i < closes.length; i++) {
+    const x = i * step;
+    const y = canvas.height - ((closes[i] - min) / (range || 1)) * (canvas.height - 14) - 7;
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+
+  // Create subtle gradient fill under the line
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, 'rgba(34, 197, 94, 0.15)');
+  grad.addColorStop(1, 'rgba(34, 197, 94, 0.0)');
+  ctx.lineTo(canvas.width, canvas.height);
+  ctx.lineTo(0, canvas.height);
+  ctx.fillStyle = grad;
+  ctx.closePath();
+  ctx.fill();
+}
+
+async function addSymbol() {
+  const input = document.getElementById('newSymbol');
+  const symbol = input.value.trim().toUpperCase();
+  if (!symbol) {
+    showMessage('Please enter a stock ticker symbol.', true);
+    return;
+  }
+
+  const btn = document.getElementById('addSymbolBtn');
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/symbols`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol })
+    });
+    
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || 'Failed to add symbol');
+    }
+
+    input.value = '';
+    showMessage(`Successfully added ${symbol}!`, false);
+    tick();
+  } catch (err) {
+    showMessage(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Add Stock/ETF';
+  }
+}
+
+async function deleteSymbol(symbol) {
+  if (!confirm(`Are you sure you want to remove ${symbol}?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/symbols/${symbol}`, {
+      method: 'DELETE'
+    });
+    
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || 'Failed to delete symbol');
+    }
+
+    showMessage(`Successfully removed ${symbol}.`, false);
+    tick();
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+}
+
+function startTimer() {
+  if (timer) clearInterval(timer);
+  const rate = parseInt(document.getElementById('refreshRate').value);
+  timer = setInterval(tick, rate);
+}
+
+document.getElementById('addSymbolBtn').addEventListener('click', addSymbol);
+document.getElementById('newSymbol').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') addSymbol();
+});
+
+document.getElementById('refreshRate').addEventListener('change', startTimer);
+document.getElementById('rsiPeriod').addEventListener('change', tick);
+
+// Initialize Backend URL Setting
+// Auto-detect and initialize backend connection
+async function initBackendConnection() {
+  const urlInput = document.getElementById('backendUrlInput');
+  showLoader(true, 'Initializing server connection...');
+  
+  if (BACKEND_URL) {
+    if (urlInput) urlInput.value = BACKEND_URL;
+    await tick(false);
+    startTimer();
+    showLoader(false);
+    return;
+  }
+
+  const currentOrigin = (window.location.origin.startsWith('file') || window.location.origin.includes('localhost')) 
+    ? 'http://localhost:4000' 
+    : window.location.origin;
+
+  try {
+    const res = await fetch(`${currentOrigin}/api/quotes?period=14`);
+    if (res.ok) {
+      BACKEND_URL = currentOrigin;
+    } else {
+      BACKEND_URL = 'http://localhost:4000';
+    }
+  } catch (err) {
+    BACKEND_URL = 'http://localhost:4000';
+  }
+
+  if (urlInput) urlInput.value = BACKEND_URL;
+  await tick(false);
+  startTimer();
+  showLoader(false);
+}
+
+const urlInput = document.getElementById('backendUrlInput');
+if (urlInput) {
+  urlInput.addEventListener('change', () => {
+    let val = urlInput.value.trim();
+    if (val.endsWith('/')) val = val.slice(0, -1);
+    if (val) {
+      localStorage.setItem('backend_url', val);
+      BACKEND_URL = val;
+      showMessage(`Backend URL updated to: ${val}`, false);
+      tick();
+    } else {
+      localStorage.removeItem('backend_url');
+      BACKEND_URL = '';
+      initBackendConnection();
+    }
+  });
+}
+
+initBackendConnection();
+</script>
+</body>
+</html>
