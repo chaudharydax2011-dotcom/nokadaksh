@@ -955,6 +955,7 @@ if (BACKEND_URL.startsWith('__BACKEND_URL')) {
 }
 let timer = null;
 let cachedData = [];
+let isFetching = false;
 
 function showMessage(msg, isError = true) {
   const banner = document.getElementById('errBanner');
@@ -1038,6 +1039,9 @@ function updateConnectionStatus(isOnline) {
 }
 
 async function tick(showSpinner = false) {
+  if (isFetching) return;
+  isFetching = true;
+
   updateMarketStatusHTML();
   if (showSpinner) showLoader(true, 'Fetching latest stock signals...');
   const period = document.getElementById('rsiPeriod').value;
@@ -1075,6 +1079,7 @@ async function tick(showSpinner = false) {
       sourceLabel.style.color = 'var(--red)';
     }
   } finally {
+    isFetching = false;
     if (showSpinner) showLoader(false);
   }
 }
@@ -1099,9 +1104,10 @@ function renderNiftyWidget(nifty) {
   }
 
   ltpEl.textContent = '₹' + nifty.ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const sign = nifty.changePct >= 0 ? '+' : '';
-  changeEl.textContent = `${sign}${nifty.changePct.toFixed(2)}%`;
-  changeEl.style.color = nifty.changePct >= 0 ? 'var(--green)' : 'var(--red)';
+  const changePctVal = nifty.changePct !== null && nifty.changePct !== undefined ? nifty.changePct : 0;
+  const sign = changePctVal >= 0 ? '+' : '';
+  changeEl.textContent = `${sign}${changePctVal.toFixed(2)}%`;
+  changeEl.style.color = changePctVal >= 0 ? 'var(--green)' : 'var(--red)';
 
   // Draw Nifty 50 Index sparkline
   const canvas = document.getElementById('niftyIndexSparkline');
@@ -1109,7 +1115,8 @@ function renderNiftyWidget(nifty) {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const closes = nifty.closes;
+    const closes = nifty.closes.filter(c => c !== null && c !== undefined);
+    if (closes.length < 2) return;
     const min = Math.min(...closes);
     const max = Math.max(...closes);
     const range = max - min;
@@ -1537,6 +1544,13 @@ if (urlInput) {
     }
   });
 }
+
+// Redraw charts on window resize to keep canvas responsive and sharp
+window.addEventListener('resize', () => {
+  if (cachedData && cachedData.length > 0) {
+    renderAll(cachedData);
+  }
+});
 
 initBackendConnection();
 </script>
