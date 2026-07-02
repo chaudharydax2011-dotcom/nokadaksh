@@ -184,7 +184,8 @@ async function fetchHistoricalCloses(symbol, days = 150) {
  */
 async function verifySymbol(symbol) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?range=1d&interval=1d`;
+    const ticker = symbol.startsWith('^') ? symbol : `${symbol}.NS`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
       timeout: 5000

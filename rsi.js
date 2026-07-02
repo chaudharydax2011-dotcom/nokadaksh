@@ -37,7 +37,10 @@ function calcRSI(closes, period = 14) {
     avgLoss = (avgLoss * (period - 1) + loss) / period;
   }
 
-  if (avgLoss === 0) return 100;
+  if (avgLoss === 0) {
+    if (avgGain === 0) return 50; // Balanced/flat momentum
+    return 100; // Direct gain momentum
+  }
 
   const rs = avgGain / avgLoss;
   return +(100 - 100 / (1 + rs)).toFixed(2);
