@@ -145,20 +145,24 @@ app.get('/api/quotes', async (req, res) => {
       } catch (err) {
         closes = [];
       }
+      // Save newly fetched pure daily closes to cache
+      cache[symbol] = { closes, lastFetch: Date.now(), lastQuote: quote };
     }
 
-    // Append current live price to historical close series for accurate RSI calculation
+    // Create a temporary copy for calculations and append the live LTP
+    let calcCloses = [...closes];
     if (quote.ltp != null) {
-      if (!closes || closes.length === 0) {
-        closes = [quote.ltp];
+      if (calcCloses.length === 0) {
+        calcCloses = [quote.ltp];
       } else {
-        closes = [...closes, quote.ltp].slice(-150);
+        calcCloses = [...calcCloses, quote.ltp].slice(-150);
       }
     }
 
-    // Save back to cache
+    // Save latest quote metadata to cache, keeping the daily closes array pure
     const now = Date.now();
-    cache[symbol] = { closes, lastFetch: now, lastQuote: quote };
+    cache[symbol].lastFetch = now;
+    cache[symbol].lastQuote = quote;
 
     if (quote.isMock) {
       isAnyMock = true;
@@ -169,10 +173,10 @@ app.get('/api/quotes', async (req, res) => {
         ltp: quote.ltp,
         changePct: quote.changePct,
         isMock: quote.isMock,
-        closes: closes
+        closes: calcCloses
       };
     } else {
-      const rsi = calcRSI(closes, period);
+      const rsi = calcRSI(calcCloses, period);
       const sig = signalFor(rsi);
       results.push({
         symbol,
@@ -184,7 +188,7 @@ app.get('/api/quotes', async (req, res) => {
         color: sig.color,
         updatedAt: new Date(now).toISOString(),
         isMock: quote.isMock,
-        closes: closes
+        closes: calcCloses
       });
     }
   }
