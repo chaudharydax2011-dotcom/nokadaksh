@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { fetchLTP, fetchHistoricalCloses, verifySymbol } = require('./growwClient');
+const { fetchLTP, fetchHistoricalCloses, verifySymbol, fetchBatchLTP } = require('./growwClient');
 const { calcRSI, signalFor } = require('./rsi');
 const fs = require('fs');
 
@@ -126,45 +126,68 @@ app.get('/api/quotes', async (req, res) => {
   const period = parseInt(req.query.period || '14');
   let isAnyMock = false;
 
-  // Fetch Nifty 50 Index
+  const allSymbols = ['^NSEI', ...SYMBOLS];
+
+  // Fetch live prices for all symbols in a single batch request
+  const batchQuotes = await fetchBatchLTP(allSymbols);
+
+  const results = [];
   let niftyData = null;
-  try {
-    const niftyFetch = await getSymbolData('^NSEI');
-    niftyData = {
-      ltp: niftyFetch.lastQuote?.ltp ?? null,
-      changePct: niftyFetch.lastQuote?.changePct ?? null,
-      isMock: niftyFetch.lastQuote?.isMock ?? false,
-      closes: niftyFetch.closes ?? []
-    };
-    if (niftyFetch.lastQuote?.isMock) {
+
+  for (const symbol of allSymbols) {
+    const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
+    
+    // Get historical closes from cache, fallback if missing
+    let closes = cache[symbol]?.closes;
+    if (!closes || closes.length < 50) {
+      try {
+        closes = await fetchHistoricalCloses(symbol, 150);
+      } catch (err) {
+        closes = [];
+      }
+    }
+
+    // Append current live price to historical close series for accurate RSI calculation
+    if (quote.ltp != null) {
+      if (!closes || closes.length === 0) {
+        closes = [quote.ltp];
+      } else {
+        closes = [...closes, quote.ltp].slice(-150);
+      }
+    }
+
+    // Save back to cache
+    const now = Date.now();
+    cache[symbol] = { closes, lastFetch: now, lastQuote: quote };
+
+    if (quote.isMock) {
       isAnyMock = true;
     }
-  } catch (err) {
-    console.error('Nifty 50 fetch error:', err.message);
-  }
 
-  const results = await Promise.all(
-    SYMBOLS.map(async (symbol) => {
-      const data = await getSymbolData(symbol);
-      const rsi = calcRSI(data.closes, period);
+    if (symbol === '^NSEI') {
+      niftyData = {
+        ltp: quote.ltp,
+        changePct: quote.changePct,
+        isMock: quote.isMock,
+        closes: closes
+      };
+    } else {
+      const rsi = calcRSI(closes, period);
       const sig = signalFor(rsi);
-      if (data.lastQuote?.isMock) {
-        isAnyMock = true;
-      }
-      return {
+      results.push({
         symbol,
-        ltp: data.lastQuote?.ltp ?? null,
-        volume: data.lastQuote?.volume ?? null,
-        changePct: data.lastQuote?.changePct ?? null,
+        ltp: quote.ltp,
+        volume: quote.volume,
+        changePct: quote.changePct,
         rsi,
         signal: sig.label,
         color: sig.color,
-        updatedAt: new Date(data.lastFetch).toISOString(),
-        isMock: data.lastQuote?.isMock ?? false,
-        closes: data.closes ?? []
-      };
-    })
-  );
+        updatedAt: new Date(now).toISOString(),
+        isMock: quote.isMock,
+        closes: closes
+      });
+    }
+  }
 
   res.json({
     data: results,
@@ -215,14 +238,36 @@ app.delete('/api/symbols/:symbol', (req, res) => {
   res.json({ success: true, symbols: SYMBOLS });
 });
 
-// Serve frontend at the root path
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
+// Helper to delay execution
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+async function warmUpCache() {
+  console.log("Warming up historical data cache...");
+  const allSymbols = ['^NSEI', ...SYMBOLS];
+  for (const symbol of allSymbols) {
+    try {
+      let closes = cache[symbol]?.closes;
+      if (!closes || closes.length < 50) {
+        console.log(`Seeding history for ${symbol}...`);
+        closes = await fetchHistoricalCloses(symbol, 150);
+        cache[symbol] = {
+          closes,
+          lastFetch: Date.now(),
+          lastQuote: { ltp: null, volume: null, changePct: null, isMock: true }
+        };
+        await sleep(150);
+      }
+    } catch (err) {
+      console.error(`Error seeding history for ${symbol}:`, err.message);
+    }
+  }
+  console.log("Historical data cache warm-up completed.");
+}
 
 app.listen(PORT, () => {
   console.log(`NSE RSI backend running on http://localhost:${PORT}`);
   console.log(`Rate-limit protection: min ${MIN_REFRESH_MS}ms between real API calls per symbol`);
+  
+  // Start background sequential cache warm-up
+  warmUpCache();
 });

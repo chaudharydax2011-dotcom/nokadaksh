@@ -270,4 +270,83 @@ async function fetchIndexCandles(symbol, days = 30) {
   }
 }
 
-module.exports = { fetchLTP, fetchHistoricalCloses, verifySymbol, fetchIndexCandles };
+/**
+ * Fetch latest traded price (LTP) and change percentage for multiple symbols in chunked batch requests (max 15 per call).
+ */
+async function fetchBatchLTP(symbols) {
+  if (isMockMode) {
+    const result = {};
+    for (const sym of symbols) {
+      result[sym] = getMockLTP(sym);
+    }
+    return result;
+  }
+
+  // Chunk symbols array into sizes of 15 to stay safely under Yahoo Finance's 20 symbol limit
+  const chunks = [];
+  const chunkSize = 15;
+  for (let i = 0; i < symbols.length; i += chunkSize) {
+    chunks.push(symbols.slice(i, i + chunkSize));
+  }
+
+  const mergedResults = {};
+
+  try {
+    for (const chunk of chunks) {
+      const tickers = chunk.map(s => encodeURIComponent(s.startsWith('^') ? s : `${s}.NS`));
+      const url = `https://query1.finance.yahoo.com/v8/finance/spark?symbols=${tickers.join(',')}&range=1d&interval=5m`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        timeout: 8000
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      
+      for (const sym of chunk) {
+        const ticker = sym.startsWith('^') ? sym : `${sym}.NS`;
+        const data = json[ticker];
+        if (data && data.close && data.close.length > 0) {
+          // Find last non-null close price
+          let ltp = null;
+          for (let i = data.close.length - 1; i >= 0; i--) {
+            if (data.close[i] != null) {
+              ltp = data.close[i];
+              break;
+            }
+          }
+          if (ltp === null) ltp = data.previousClose;
+          
+          const prevClose = data.previousClose || ltp;
+          const changePct = prevClose ? +(((ltp - prevClose) / prevClose) * 100).toFixed(2) : 0;
+          
+          mergedResults[sym] = {
+            symbol: sym,
+            ltp: +ltp.toFixed(2),
+            volume: null,
+            changePct,
+            isMock: false
+          };
+        } else {
+          mergedResults[sym] = getMockLTP(sym);
+        }
+      }
+      
+      // Delay 100ms between chunks to prevent throttling
+      if (chunks.length > 1) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+    return mergedResults;
+  } catch (err) {
+    console.warn(`[YahooFinance] Chunked batch LTP fetch failed: ${err.message}. Falling back to simulations.`);
+    const result = {};
+    for (const sym of symbols) {
+      result[sym] = getMockLTP(sym);
+    }
+    return result;
+  }
+}
+
+module.exports = { fetchLTP, fetchHistoricalCloses, verifySymbol, fetchIndexCandles, fetchBatchLTP };
