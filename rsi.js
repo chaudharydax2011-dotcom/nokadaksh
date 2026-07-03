@@ -48,11 +48,11 @@ function calcRSI(closes, period = 14) {
 
 function signalFor(rsi) {
   if (rsi === null) return { label: 'N/A', color: '#7d93b2' };
-  if (rsi > 70) return { label: 'STRONG SELL', color: '#ef4444' };
-  if (rsi > 60) return { label: 'SELL', color: '#f97316' };
-  if (rsi >= 35) return { label: 'HOLD', color: '#eab308' };
-  if (rsi >= 30) return { label: 'BUY', color: '#00ff66' };
-  return { label: 'STRONG BUY', color: '#15803d' };
+  if (rsi > 70)    return { label: 'STRONG SELL', color: '#ef4444' };
+  if (rsi > 65)    return { label: 'SELL',        color: '#f97316' };
+  if (rsi >= 35)   return { label: 'HOLD',        color: '#eab308' };
+  if (rsi >= 30)   return { label: 'BUY',         color: '#00ff66' };
+  return             { label: 'STRONG BUY',  color: '#15803d' };
 }
 
 module.exports = { calcRSI, signalFor };
