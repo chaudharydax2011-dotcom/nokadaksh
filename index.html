@@ -1123,7 +1123,7 @@ function renderNiftyWidget(nifty) {
 
     ctx.beginPath();
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = nifty.changePct >= 0 ? '#22c55e' : '#ef4444';
+    ctx.strokeStyle = changePctVal >= 0 ? '#22c55e' : '#ef4444';
 
     const step = canvas.width / (closes.length - 1);
     for (let i = 0; i < closes.length; i++) {
@@ -1389,7 +1389,8 @@ function renderSparklineCanvas(rows) {
   
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
-  const closes = target.closes;
+  const closes = target.closes.filter(c => c !== null && c !== undefined);
+  if (closes.length < 2) return;
   const min = Math.min(...closes);
   const max = Math.max(...closes);
   const range = max - min;
@@ -1447,7 +1448,8 @@ async function addSymbol() {
 
     input.value = '';
     showMessage(`Successfully added ${symbol}!`, false);
-    tick();
+    // Small delay to let isFetching lock reset before re-fetching
+    setTimeout(() => tick(), 300);
   } catch (err) {
     showMessage(err.message, true);
   } finally {
@@ -1472,7 +1474,8 @@ async function deleteSymbol(symbol) {
     }
 
     showMessage(`Successfully removed ${symbol}.`, false);
-    tick();
+    // Small delay to let isFetching lock reset before re-fetching
+    setTimeout(() => tick(), 300);
   } catch (err) {
     showMessage(err.message, true);
   }

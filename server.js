@@ -82,123 +82,84 @@ function saveSymbols() {
 // ============================================================
 const cache = {}; // symbol -> { closes: [...], lastFetch: timestamp, lastQuote: {...} }
 
-async function getSymbolData(symbol) {
-  const now = Date.now();
-  const entry = cache[symbol];
-
-  if (entry && (now - entry.lastFetch) < MIN_REFRESH_MS) {
-    return entry; // serve cached data, don't hit Groww again yet
-  }
-
-  try {
-    // Seed historical closes only once (or rarely) since they barely change intraday
-    let closes = entry?.closes;
-    if (!closes || closes.length < 50) {
-      closes = await fetchHistoricalCloses(symbol, 150);
-    }
-
-    const quote = await fetchLTP(symbol);
-    if (quote.ltp != null) {
-      // Create a fresh array or update the existing one
-      if (!closes || closes.length === 0) {
-        closes = [quote.ltp];
-      } else {
-        closes = [...closes, quote.ltp].slice(-150); // keep last 150 points
-      }
-    }
-
-    cache[symbol] = { closes, lastFetch: now, lastQuote: quote };
-    return cache[symbol];
-  } catch (err) {
-    console.error(`[${symbol}] fetch error:`, err.message);
-    // If it fails, cache a temporary mock state to avoid hammering the endpoint
-    const fallbackEntry = entry || {
-      closes: [],
-      lastFetch: now,
-      lastQuote: { ltp: null, volume: null, changePct: null, isMock: true }
-    };
-    cache[symbol] = fallbackEntry;
-    return fallbackEntry;
-  }
-}
-
 app.get('/api/quotes', async (req, res) => {
   const period = parseInt(req.query.period || '14');
+  if (isNaN(period) || period < 2 || period > 50) {
+    return res.status(400).json({ error: 'Invalid RSI period. Must be between 2 and 50.' });
+  }
   let isAnyMock = false;
-
   const allSymbols = ['^NSEI', ...SYMBOLS];
 
-  // Fetch live prices for all symbols in a single batch request
-  const batchQuotes = await fetchBatchLTP(allSymbols);
+  try {
+    // Fetch live prices for all symbols in a single batch request
+    const batchQuotes = await fetchBatchLTP(allSymbols);
+    const results = [];
+    let niftyData = null;
 
-  const results = [];
-  let niftyData = null;
+    for (const symbol of allSymbols) {
+      const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
 
-  for (const symbol of allSymbols) {
-    const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
-    
-    // Get historical closes from cache, fallback if missing
-    let closes = cache[symbol]?.closes;
-    if (!closes || closes.length < 50) {
-      try {
-        closes = await fetchHistoricalCloses(symbol, 150);
-      } catch (err) {
-        closes = [];
+      // Get historical closes from cache, fallback if missing
+      let closes = cache[symbol]?.closes;
+      if (!closes || closes.length < 50) {
+        try {
+          closes = await fetchHistoricalCloses(symbol, 150);
+        } catch (err) {
+          closes = [];
+        }
       }
-      // Save newly fetched pure daily closes to cache
-      cache[symbol] = { closes, lastFetch: Date.now(), lastQuote: quote };
-    }
 
-    // Create a temporary copy for calculations and append the live LTP
-    let calcCloses = [...closes];
-    if (quote.ltp != null) {
-      if (calcCloses.length === 0) {
-        calcCloses = [quote.ltp];
+      // Create a temporary copy for calculations and append the live LTP (never mutate cached closes)
+      let calcCloses = [...(closes || [])];
+      if (quote.ltp != null) {
+        if (calcCloses.length === 0) {
+          calcCloses = [quote.ltp];
+        } else {
+          calcCloses = [...calcCloses, quote.ltp].slice(-150);
+        }
+      }
+
+      // Save pure daily closes + latest quote metadata to cache
+      const now = Date.now();
+      cache[symbol] = { closes: closes || [], lastFetch: now, lastQuote: quote };
+
+      if (quote.isMock) isAnyMock = true;
+
+      if (symbol === '^NSEI') {
+        niftyData = {
+          ltp: quote.ltp,
+          changePct: quote.changePct,
+          isMock: quote.isMock,
+          closes: calcCloses
+        };
       } else {
-        calcCloses = [...calcCloses, quote.ltp].slice(-150);
+        const rsi = calcRSI(calcCloses, period);
+        const sig = signalFor(rsi);
+        results.push({
+          symbol,
+          ltp: quote.ltp,
+          volume: quote.volume,
+          changePct: quote.changePct,
+          rsi,
+          signal: sig.label,
+          color: sig.color,
+          updatedAt: new Date(Date.now()).toISOString(),
+          isMock: quote.isMock,
+          closes: calcCloses
+        });
       }
     }
 
-    // Save latest quote metadata to cache, keeping the daily closes array pure
-    const now = Date.now();
-    cache[symbol].lastFetch = now;
-    cache[symbol].lastQuote = quote;
-
-    if (quote.isMock) {
-      isAnyMock = true;
-    }
-
-    if (symbol === '^NSEI') {
-      niftyData = {
-        ltp: quote.ltp,
-        changePct: quote.changePct,
-        isMock: quote.isMock,
-        closes: calcCloses
-      };
-    } else {
-      const rsi = calcRSI(calcCloses, period);
-      const sig = signalFor(rsi);
-      results.push({
-        symbol,
-        ltp: quote.ltp,
-        volume: quote.volume,
-        changePct: quote.changePct,
-        rsi,
-        signal: sig.label,
-        color: sig.color,
-        updatedAt: new Date(now).toISOString(),
-        isMock: quote.isMock,
-        closes: calcCloses
-      });
-    }
+    res.json({
+      data: results,
+      minRefreshMs: MIN_REFRESH_MS,
+      isMock: isAnyMock,
+      nifty: niftyData
+    });
+  } catch (err) {
+    console.error('[/api/quotes] Unhandled error:', err.message);
+    res.status(500).json({ error: 'Internal server error while fetching quotes.' });
   }
-
-  res.json({
-    data: results,
-    minRefreshMs: MIN_REFRESH_MS,
-    isMock: isAnyMock,
-    nifty: niftyData
-  });
 });
 
 // Add a symbol dynamically with validation
