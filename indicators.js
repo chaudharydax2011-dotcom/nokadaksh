@@ -258,4 +258,69 @@ function calcScore(opts) {
   return { score, label, color };
 }
 
-module.exports = { calcEMA, calcEMASeries, calcMACD, calcADX, calcScore };
+/**
+ * Calculates strict, highly accurate rule-based Technical Signal
+ *
+ * Rules:
+ * - Strong Buy: RSI < 30 + MACD Bullish + Price > EMA20 > EMA50 + ADX > 25 + Volume > 20-Day Average
+ * - Buy: RSI 30-40 + MACD Bullish + Price > EMA20 + ADX > 20
+ * - Strong Sell: MACD Bearish + Price < EMA20 < EMA50 + ADX > 25 + RSI > 70
+ * - Sell: MACD Bearish + Price < EMA20 + RSI > 60
+ * - Hold: Mixed Signals (otherwise)
+ */
+function calcCompositeSignal(opts) {
+  const { rsi, macd, ema20, ema50, adx, ltp, lastVolume, avgVolume } = opts;
+
+  if (rsi === null || rsi === undefined || !macd || ema20 === null || ema20 === undefined || ema50 === null || ema50 === undefined || !adx || ltp === null || ltp === undefined) {
+    return { label: 'HOLD', color: '#eab308' };
+  }
+
+  const isMacdBullish = macd.trend === 'BULLISH';
+  const isMacdBearish = macd.trend === 'BEARISH';
+  const priceAboveEma20 = ltp > ema20;
+  const priceBelowEma20 = ltp < ema20;
+  const ema20AboveEma50 = ema20 > ema50;
+  const ema20BelowEma50 = ema20 < ema50;
+  const isVolAboveAvg = lastVolume !== null && avgVolume !== null && lastVolume > avgVolume;
+
+  const isStrongBuy =
+    rsi < 30 &&
+    isMacdBullish &&
+    priceAboveEma20 &&
+    ema20AboveEma50 &&
+    adx.adx > 25 &&
+    isVolAboveAvg;
+
+  const isBuy =
+    rsi >= 30 && rsi <= 40 &&
+    isMacdBullish &&
+    priceAboveEma20 &&
+    adx.adx > 20;
+
+  const isStrongSell =
+    isMacdBearish &&
+    priceBelowEma20 &&
+    ema20BelowEma50 &&
+    adx.adx > 25 &&
+    rsi > 70;
+
+  const isSell =
+    isMacdBearish &&
+    priceBelowEma20 &&
+    rsi > 60;
+
+  if (isStrongBuy) {
+    return { label: 'STRONG BUY', color: '#15803d' };
+  } else if (isBuy) {
+    return { label: 'BUY', color: '#00ff66' };
+  } else if (isStrongSell) {
+    return { label: 'STRONG SELL', color: '#ef4444' };
+  } else if (isSell) {
+    return { label: 'SELL', color: '#f97316' };
+  } else {
+    return { label: 'HOLD', color: '#eab308' };
+  }
+}
+
+module.exports = { calcEMA, calcEMASeries, calcMACD, calcADX, calcScore, calcCompositeSignal };
+

@@ -7,7 +7,7 @@ const fs      = require('fs');
 
 const { fetchHistoricalOHLCV, verifySymbol, fetchBatchLTP } = require('./growwClient');
 const { calcRSI, signalFor }                                 = require('./rsi');
-const { calcEMA, calcMACD, calcADX, calcScore }             = require('./indicators');
+const { calcEMA, calcMACD, calcADX, calcScore, calcCompositeSignal } = require('./indicators');
 
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET','POST','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
@@ -126,18 +126,28 @@ app.get('/api/quotes', async (req, res) => {
 
       // 5. Calculate all indicators
       const rsi  = calcRSI(calcCloses, period);
-      const sig  = signalFor(rsi);
       // EMA and MACD use calcCloses (with live LTP appended)
       const ema20 = calcEMA(calcCloses, 20);
       const ema50 = calcEMA(calcCloses, 50);
       const macd  = calcMACD(calcCloses);
       // ADX uses ONLY completed historical bars — not the incomplete today bar
-      // This avoids distorting ADX with a partial intraday candle (unknown true H/L)
       const adx   = calcADX(highs, lows, closes);
 
       // Volume: last day from historical + 20-day avg
       const lastVol = volumes.length > 0 ? volumes[volumes.length - 1] : null;
       const avgVol  = avgLast(volumes, 20);
+
+      // Calculate rule-based Signal and composite Score
+      const sig = calcCompositeSignal({
+        rsi,
+        macd,
+        ema20,
+        ema50,
+        adx,
+        ltp: quote.ltp,
+        lastVolume: lastVol,
+        avgVolume: avgVol
+      });
 
       const scoreData = calcScore({
         rsi,
