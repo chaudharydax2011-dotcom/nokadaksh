@@ -89,7 +89,7 @@ app.get('/api/quotes', async (req, res) => {
 
       if (needsRefresh) {
         try {
-          ({ closes, highs, lows, volumes } = await fetchHistoricalOHLCV(symbol, 150));
+          ({ closes, highs, lows, volumes } = await fetchHistoricalOHLCV(symbol, 200));
         } catch (e) {
           closes = []; highs = []; lows = []; volumes = [];
         }
@@ -127,10 +127,13 @@ app.get('/api/quotes', async (req, res) => {
       // 5. Calculate all indicators
       const rsi  = calcRSI(calcCloses, period);
       const sig  = signalFor(rsi);
+      // EMA and MACD use calcCloses (with live LTP appended)
       const ema20 = calcEMA(calcCloses, 20);
       const ema50 = calcEMA(calcCloses, 50);
       const macd  = calcMACD(calcCloses);
-      const adx   = calcADX(calcHighs, calcLows, calcCloses);
+      // ADX uses ONLY completed historical bars — not the incomplete today bar
+      // This avoids distorting ADX with a partial intraday candle (unknown true H/L)
+      const adx   = calcADX(highs, lows, closes);
 
       // Volume: last day from historical + 20-day avg
       const lastVol = volumes.length > 0 ? volumes[volumes.length - 1] : null;
@@ -211,7 +214,7 @@ async function warmUpCache() {
     try {
       if (!cache[symbol]?.closes || cache[symbol].closes.length < 50) {
         console.log(`Seeding OHLCV for ${symbol}...`);
-        const ohlcv = await fetchHistoricalOHLCV(symbol, 150);
+        const ohlcv = await fetchHistoricalOHLCV(symbol, 200);
         cache[symbol] = { ...ohlcv, lastFetch: Date.now(), lastQuote: { ltp: null, volume: null, changePct: null, isMock: true } };
         await sleep(150);
       }

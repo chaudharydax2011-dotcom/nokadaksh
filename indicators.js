@@ -1,4 +1,4 @@
-﻿// indicators.js
+// indicators.js
 // ============================================================
 // Industry-standard technical indicator calculations:
 // EMA, MACD (12/26/9), ADX (Wilder 14-period), Score/100
@@ -65,41 +65,49 @@ function calcMACD(closes) {
 
 /**
  * ADX — Average Directional Index (Wilder 14-period)
- * Needs parallel highs[], lows[], closes[] arrays, >= 29 candles
- * TR  = max(H-L, |H-PrevC|, |L-PrevC|)
- * +DM = upMove if upMove > downMove and upMove > 0, else 0
- * -DM = downMove if downMove > upMove and downMove > 0, else 0
- * Wilder Smooth: S(n) = S(n-1) - S(n-1)/period + val(n)
- * +DI = 100 * SmPlusDM / SmTR
- * -DI = 100 * SmMinusDM / SmTR
- * DX  = 100 * |+DI - -DI| / (+DI + -DI)
- * ADX = Wilder smooth of DX
- * Returns: { adx, plusDI, minusDI, strength, direction }
+ * ACCURACY NOTES:
+ * - Only uses COMPLETED daily bars (no incomplete intraday bar)
+ * - Wilder initial smooth = simple SUM of first period TR/DM values
+ * - ADX seeded as SMA of first 'period' DX values (not first DX value alone)
+ * - Needs >= period*2 completed bars for reliable ADX
  */
 function calcADX(highs, lows, closes, period) {
   if (period === undefined) period = 14;
   if (!highs || !lows || !closes) return null;
   const len = Math.min(highs.length, lows.length, closes.length);
-  if (len < period * 2 + 1) return null;
+  if (len < period * 2 + 2) return null;
+
   const trArr = [], pDMArr = [], mDMArr = [];
   for (let i = 1; i < len; i++) {
     const up   = highs[i] - highs[i - 1];
     const down = lows[i - 1] - lows[i];
-    trArr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i-1]), Math.abs(lows[i] - closes[i-1])));
+    trArr.push(Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i]  - closes[i - 1]),
+      Math.abs(lows[i]   - closes[i - 1])
+    ));
+    // +DM: only when upward move strictly greater than downward move
     pDMArr.push(up > down && up > 0 ? up : 0);
+    // -DM: only when downward move strictly greater than upward move
     mDMArr.push(down > up && down > 0 ? down : 0);
   }
-  if (trArr.length < period) return null;
+  if (trArr.length < period * 2) return null;
+
+  // Wilder initial smooth = sum of first 'period' values
   let smTR = trArr.slice(0, period).reduce((a, b) => a + b, 0);
   let smP  = pDMArr.slice(0, period).reduce((a, b) => a + b, 0);
   let smM  = mDMArr.slice(0, period).reduce((a, b) => a + b, 0);
+
   const toDX = (tr, p, m) => {
     if (tr === 0) return 0;
-    const pdi = 100 * p / tr, mdi = 100 * m / tr;
-    const s = pdi + mdi;
+    const pdi = 100 * p / tr;
+    const mdi = 100 * m / tr;
+    const s   = pdi + mdi;
     return s === 0 ? 0 : 100 * Math.abs(pdi - mdi) / s;
   };
-  const dxArr = [toDX(smTR, smP, smM)];
+
+  // Collect DX values for each subsequent bar
+  const dxArr = [];
   for (let i = period; i < trArr.length; i++) {
     smTR = smTR - smTR / period + trArr[i];
     smP  = smP  - smP  / period + pDMArr[i];
@@ -107,62 +115,127 @@ function calcADX(highs, lows, closes, period) {
     dxArr.push(toDX(smTR, smP, smM));
   }
   if (dxArr.length < period) return null;
+
+  // ADX seed = SMA of first 'period' DX values (proper Wilder initialization)
   let adx = dxArr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < dxArr.length; i++) adx = (adx * (period - 1) + dxArr[i]) / period;
+  for (let i = period; i < dxArr.length; i++) {
+    adx = (adx * (period - 1) + dxArr[i]) / period;
+  }
+
   const pDI = smTR > 0 ? +(100 * smP / smTR).toFixed(2) : 0;
   const mDI = smTR > 0 ? +(100 * smM / smTR).toFixed(2) : 0;
   adx = +adx.toFixed(2);
+  const diSpread = Math.abs(pDI - mDI); // how decisively one DI leads the other
+
   let strength;
   if      (adx < 20) strength = 'WEAK';
   else if (adx < 25) strength = 'DEVELOPING';
   else if (adx < 40) strength = 'STRONG';
   else               strength = 'VERY STRONG';
-  return { adx, plusDI: pDI, minusDI: mDI, strength, direction: pDI >= mDI ? 'BULLISH' : 'BEARISH' };
+
+  return {
+    adx,
+    plusDI:   pDI,
+    minusDI:  mDI,
+    diSpread: +diSpread.toFixed(2),
+    strength,
+    direction: pDI >= mDI ? 'BULLISH' : 'BEARISH'
+  };
 }
 
 /**
- * Composite Score /100
- * RSI=20pts, MACD=20pts, EMA position=25pts, ADX=20pts, Volume=15pts
- * Returns: { score, label, color }
+ * Composite Score /100 — accurate multi-indicator weighted system
+ *
+ * Weights: RSI=20, MACD=20 (with histogram strength), EMA=25, ADX=20 (with DI spread), Volume=15
+ * BONUS: RSI + MACD confluence = up to +5 extra pts (capped at 100)
  */
 function calcScore(opts) {
   const { rsi, macd, ema20, ema50, adx: adxData, ltp, lastVolume, avgVolume } = opts;
   let score = 0;
 
-  // RSI: 20pts
+  // ── RSI: 20pts ──
+  // Linear scoring based on distance from neutral (50)
   if (rsi !== null && rsi !== undefined) {
-    if      (rsi < 30)  score += 18 + (30 - rsi) / 30 * 2;
-    else if (rsi < 35)  score += 12 + (35 - rsi) / 5  * 6;
-    else if (rsi < 50)  score += 7  + (50 - rsi) / 15 * 5;
-    else if (rsi < 65)  score += 3  + (65 - rsi) / 15 * 4;
-    else if (rsi < 70)  score += 1  + (70 - rsi) / 5  * 2;
-    else                score += Math.max(0, 1 - (rsi - 70) / 10);
+    if      (rsi < 20)  score += 20;
+    else if (rsi < 30)  score += 17 + (30 - rsi) / 10 * 3;
+    else if (rsi < 35)  score += 13 + (35 - rsi) / 5  * 4;
+    else if (rsi < 50)  score += 8  + (50 - rsi) / 15 * 5;
+    else if (rsi < 65)  score += 4  + (65 - rsi) / 15 * 4;
+    else if (rsi < 70)  score += 2  + (70 - rsi) / 5  * 2;
+    else if (rsi < 80)  score += Math.max(0, 2 - (rsi - 70) / 10 * 2);
+    else                score += 0;
   }
 
-  // MACD: 20pts
+  // ── MACD: 20pts — trend + crossover + histogram magnitude ──
   if (macd) {
-    if (macd.trend === 'BULLISH') score += macd.crossover === 'BULLISH_CROSS' ? 20 : 14;
-    else                          score += macd.crossover === 'BEARISH_CROSS' ?  0 :  5;
-  } else { score += 8; }
+    const histAbs = Math.abs(macd.histogram);
+    const histMag = Math.abs(macd.macd); // normalize histogram vs MACD value
+    const histRatio = histMag > 0 ? Math.min(histAbs / histMag, 1) : 0;
+    if (macd.trend === 'BULLISH') {
+      // Base: 12-16 pts, crossover bonus: +4, histogram strength: +0 to +2
+      let pts = macd.crossover === 'BULLISH_CROSS' ? 17 : 13;
+      pts += histRatio * 3; // strong histogram = higher confidence
+      score += Math.min(20, pts);
+    } else {
+      let pts = macd.crossover === 'BEARISH_CROSS' ? 0 : 4;
+      pts += (1 - histRatio) * 2; // weak bearish histogram = slightly less bearish
+      score += Math.min(8, pts);
+    }
+  } else {
+    score += 8; // neutral — insufficient data
+  }
 
-  // EMA: 25pts
+  // ── EMA Position: 25pts ──
+  // Price vs EMA20 vs EMA50 — all three relationships matter
   if (ltp != null && ema20 != null && ema50 != null) {
-    if      (ltp > ema20 && ema20 > ema50)   score += 24;
-    else if (ltp > ema20 && ema20 <= ema50)  score += 16;
-    else if (ltp <= ema20 && ltp > ema50)    score += 9;
-    else                                      score += 2;
-  } else { score += 10; }
+    const aboveEMA20      = ltp   > ema20;
+    const aboveEMA50      = ltp   > ema50;
+    const ema20AboveEMA50 = ema20 > ema50;
 
-  // ADX: 20pts
+    // Pct gap between price and EMAs for proportional scoring
+    const gapEMA20 = Math.abs(ltp - ema20) / ema20;
+    const gapEMA50 = Math.abs(ltp - ema50) / ema50;
+
+    if (aboveEMA20 && ema20AboveEMA50 && aboveEMA50) {
+      // Strong uptrend: P > EMA20 > EMA50 — scale by how far above
+      score += Math.min(25, 20 + gapEMA20 * 50);
+    } else if (aboveEMA20 && !ema20AboveEMA50) {
+      // Short-term recovery above EMA20 but below EMA50 crossover
+      score += Math.min(18, 14 + gapEMA20 * 20);
+    } else if (!aboveEMA20 && aboveEMA50) {
+      // Pullback in uptrend: below EMA20 but above EMA50
+      score += 9;
+    } else if (!aboveEMA20 && !aboveEMA50 && !ema20AboveEMA50) {
+      // Full downtrend: P < EMA20 < EMA50
+      score += Math.max(0, 3 - gapEMA50 * 20);
+    } else {
+      score += 5;
+    }
+  } else {
+    score += 10; // neutral
+  }
+
+  // ── ADX: 20pts — strength × direction × DI spread ──
   if (adxData) {
-    const bull = adxData.direction === 'BULLISH';
-    if      (adxData.adx >= 40) score += bull ? 20 : 0;
-    else if (adxData.adx >= 25) score += bull ? 17 : 2;
-    else if (adxData.adx >= 20) score += bull ? 13 : 5;
-    else                        score += 8;
-  } else { score += 8; }
+    const bull     = adxData.direction === 'BULLISH';
+    const spread   = adxData.diSpread  || Math.abs(adxData.plusDI - adxData.minusDI);
+    // DI spread confidence: 0-1 scale (spread > 20 = high confidence)
+    const spreadConf = Math.min(spread / 20, 1);
 
-  // Volume: 15pts
+    if (adxData.adx >= 40) {
+      score += bull ? Math.min(20, 17 + spreadConf * 3) : Math.max(0, 2 - spreadConf * 2);
+    } else if (adxData.adx >= 25) {
+      score += bull ? Math.min(18, 13 + spreadConf * 5) : Math.max(0, 4 - spreadConf * 2);
+    } else if (adxData.adx >= 20) {
+      score += bull ? Math.min(14, 9 + spreadConf * 5) : Math.max(3, 6 - spreadConf * 3);
+    } else {
+      score += 7; // weak/ranging — neutral but slightly bearish
+    }
+  } else {
+    score += 8;
+  }
+
+  // ── Volume: 15pts ──
   if (lastVolume && avgVolume && avgVolume > 0) {
     const r = lastVolume / avgVolume;
     if      (r >= 3.0) score += 15;
@@ -171,7 +244,19 @@ function calcScore(opts) {
     else if (r >= 1.0) score += 6;
     else if (r >= 0.5) score += 3;
     else               score += 1;
-  } else { score += 7; }
+  } else {
+    score += 7; // neutral
+  }
+
+  // ── Confluence Bonus: RSI + MACD both bullish/bearish = +3pts ──
+  if (rsi !== null && macd) {
+    const rsiBull  = rsi < 50;
+    const macdBull = macd.trend === 'BULLISH';
+    const rsiBear  = rsi > 55;
+    const macdBear = macd.trend === 'BEARISH';
+    if      (rsiBull && macdBull) score += 3; // both agree bullish
+    else if (rsiBear && macdBear) score -= 3; // both agree bearish
+  }
 
   score = Math.min(100, Math.max(0, Math.round(score)));
   let label, color;
