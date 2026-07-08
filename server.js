@@ -92,15 +92,21 @@ app.get('/api/quotes', async (req, res) => {
     for (const symbol of allSymbols) {
       const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
 
-      // 2. Get OHLCV from cache or fetch fresh
+      // 2. Get OHLCV from cache or fetch fresh (5 minutes expiration for live accuracy)
       let { closes = [], highs = [], lows = [], volumes = [], timestamps = [] } = cache[symbol] || {};
-      const needsRefresh = closes.length < 50;
+      const cacheAgeMs = Date.now() - (cache[symbol]?.lastFetch || 0);
+      const needsRefresh = closes.length < 200 || cacheAgeMs > 5 * 60 * 1000;
 
       if (needsRefresh) {
         try {
-          ({ closes, highs, lows, volumes, timestamps } = await fetchHistoricalOHLCV(symbol, 200));
+          const fresh = await fetchHistoricalOHLCV(symbol, 200);
+          closes = fresh.closes;
+          highs = fresh.highs;
+          lows = fresh.lows;
+          volumes = fresh.volumes;
+          timestamps = fresh.timestamps;
         } catch (e) {
-          closes = []; highs = []; lows = []; volumes = []; timestamps = [];
+          console.warn(`Failed to refresh OHLCV for ${symbol}, using cache fallback:`, e.message);
         }
       }
 
@@ -134,6 +140,7 @@ app.get('/api/quotes', async (req, res) => {
 
       // 4. Persist OHLCV to cache
       const now = Date.now();
+
       cache[symbol] = { closes, highs, lows, volumes, timestamps, lastFetch: now, lastQuote: quote };
 
       if (quote.isMock) isAnyMock = true;
