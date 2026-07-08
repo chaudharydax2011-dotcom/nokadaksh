@@ -654,36 +654,39 @@ if ('serviceWorker' in navigator) {
       font-size: 11px;
     }
     
-    /* Convert table to responsive Cards on mobile */
-    .main-table, .main-table thead, .main-table tbody, .main-table th, .main-table td, .main-table tr {
+    /* ── Mobile: Main table becomes rich indicator CARDS ── */
+    .main-table {
+      min-width: unset !important;
+    }
+    .main-table, .main-table thead, .main-table tbody,
+    .main-table th, .main-table td, .main-table tr {
       display: block;
     }
-    .main-table thead {
-      display: none; /* Hide header row */
-    }
+    .main-table thead { display: none; }
+
     .main-table tr {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       margin-bottom: 12px;
       padding: 12px 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
       position: relative;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     }
+
+    /* td base reset */
     .main-table td {
       border: none;
-      padding: 8px 0;
+      padding: 5px 0;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 13px;
-      border-bottom: 1px solid rgba(22, 39, 58, 0.5);
+      border-bottom: 1px solid rgba(22,39,58,0.45);
     }
-    .main-table td:last-child {
-      border-bottom: none;
-      padding-top: 10px;
-      justify-content: center;
-    }
+    .main-table td:last-child { border-bottom: none; padding-top: 8px; }
+
+    /* data-label as left side label */
     .main-table td::before {
       content: attr(data-label);
       font-weight: 600;
@@ -691,39 +694,55 @@ if ('serviceWorker' in navigator) {
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      flex-shrink: 0;
+      margin-right: 8px;
     }
-    .main-table td .color-bar {
-      width: 70px;
-      height: 16px;
+    /* No label on: row-number, symbol-header, delete */
+    .main-table td.td-num::before,
+    .main-table td.td-sym::before,
+    .main-table td.td-del::before { content: none; }
+
+    /* Row number hidden on mobile */
+    .main-table td.td-num { display: none; }
+
+    /* Symbol header td spans full width, bold */
+    .main-table td.td-sym {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 2px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--green);
+      justify-content: flex-start;
     }
-    .main-table td .delete-btn {
+
+    /* Delete button full width */
+    .main-table td.td-del {
+      justify-content: center;
+      padding-top: 8px;
+    }
+    .main-table td.td-del .delete-btn {
       width: 100%;
-      padding: 6px;
-      border-radius: 4px;
-      background: rgba(239, 68, 68, 0.1);
+      padding: 7px;
+      border-radius: 6px;
+      background: rgba(239,68,68,0.08);
       color: #ef4444;
-      border: 1px solid rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239,68,68,0.2);
       font-size: 12px;
       font-weight: 600;
     }
-    .main-table td .delete-btn::after {
-      content: " Delete Stock";
-    }
+    .main-table td.td-del .delete-btn::after { content: " Remove Stock"; }
 
     /* Convert Lowest RSI Table to cards */
     .lowest-table, .lowest-table thead, .lowest-table tbody, .lowest-table th, .lowest-table td, .lowest-table tr {
       display: block;
     }
-    .lowest-table thead {
-      display: none;
-    }
+    .lowest-table thead { display: none; }
     .lowest-table tr {
       border-bottom: 1px solid var(--border);
       padding: 8px 0;
     }
-    .lowest-table tr:last-child {
-      border-bottom: none;
-    }
+    .lowest-table tr:last-child { border-bottom: none; }
     .lowest-table td {
       border: none;
       padding: 4px 0;
@@ -736,10 +755,6 @@ if ('serviceWorker' in navigator) {
       content: attr(data-label);
       font-weight: 500;
       color: var(--text-muted);
-    }
-    .lowest-table td .color-bar {
-      width: 50px;
-      height: 10px;
     }
 
     .footer {
@@ -1351,24 +1366,24 @@ function renderMainTable(rows) {
     const scoreBg = r.scoreColor ? `background:${r.scoreColor}22; color:${r.scoreColor}; border:1px solid ${r.scoreColor}44;` : '';
     return `
     <tr>
-      <td>${i + 1}</td>
-      <td class="symbol-code">${r.symbol}</td>
-      <td style="font-weight:600;">₹${r.ltp !== null ? r.ltp.toFixed(2) : '—'}</td>
-      <td>${chgHtml(r.changePct)}</td>
-      <td style="font-weight:600;">${r.rsi !== null ? r.rsi.toFixed(2) : '—'}</td>
-      <td>${emaHtml(r.ema20Signal)}</td>
-      <td>${emaHtml(r.ema50Signal)}</td>
-      <td>${macdHtml(r.macd)}</td>
-      <td>${adxHtml(r.adx)}</td>
-      <td style="font-size:12px; color:var(--text-muted);">${fmtVol(r.volume)}</td>
-      <td><span class="score-badge" style="${scoreBg}">${r.score !== undefined ? r.score : '—'}</span></td>
-      <td>
+      <td class="td-num">${i + 1}</td>
+      <td class="td-sym symbol-code">${r.symbol} <span class="score-badge" style="${scoreBg}; margin-left:auto;">${r.score !== undefined ? r.score : '—'}</span></td>
+      <td data-label="LTP" style="font-weight:600;">₹${r.ltp !== null ? r.ltp.toFixed(2) : '—'}</td>
+      <td data-label="Chg%">${chgHtml(r.changePct)}</td>
+      <td data-label="RSI" style="font-weight:600;">${r.rsi !== null ? r.rsi.toFixed(2) : '—'}</td>
+      <td data-label="EMA20">${emaHtml(r.ema20Signal)}</td>
+      <td data-label="EMA50">${emaHtml(r.ema50Signal)}</td>
+      <td data-label="MACD">${macdHtml(r.macd)}</td>
+      <td data-label="ADX">${adxHtml(r.adx)}</td>
+      <td data-label="Volume" style="font-size:12px; color:var(--text-muted);">${fmtVol(r.volume)}</td>
+      <td data-label="Score"><span class="score-badge" style="${scoreBg}">${r.score !== undefined ? r.score : '—'}</span></td>
+      <td data-label="Signal">
         <span class="sig-label">
           <span class="dot" style="background:${r.color}; ${r.color === '#00ff66' ? 'box-shadow:0 0 8px #00ff66;' : ''}"></span>
           ${r.signal}
         </span>
       </td>
-      <td style="text-align:center;">
+      <td class="td-del">
         <button class="delete-btn" onclick="deleteSymbol('${r.symbol}')" title="Remove">×</button>
       </td>
     </tr>`;
