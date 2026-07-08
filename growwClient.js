@@ -142,42 +142,61 @@ async function fetchLTP(symbol) {
 }
 
 /**
- * Fetch historical daily closes using Yahoo Finance.
- * Falls back to simulation if the request fails.
+ * Fetch historical OHLCV data (Open, High, Low, Close, Volume) from Yahoo Finance.
+ * Returns { closes, highs, lows, volumes } — all arrays of equal length.
+ * Falls back to simulated data if request fails.
  */
-async function fetchHistoricalCloses(symbol, days = 150) {
+async function fetchHistoricalOHLCV(symbol, days = 150) {
   if (isMockMode) {
-    return generateSimulatedCandles(symbol, days);
+    const closes = generateSimulatedCandles(symbol, days);
+    const highs   = closes.map(c => +(c * (1 + (Math.random() * 0.015))).toFixed(2));
+    const lows    = closes.map(c => +(c * (1 - (Math.random() * 0.015))).toFixed(2));
+    const volumes = closes.map(() => Math.floor(50000 + Math.random() * 600000));
+    return { closes, highs, lows, volumes };
   }
-  
+
   try {
     const ticker = symbol.startsWith('^') ? symbol : `${symbol}.NS`;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=${days}d&interval=1d`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      timeout: 5000
+      timeout: 8000
     });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    if (!json.chart || !json.chart.result || json.chart.result.length === 0) {
-      throw new Error('Invalid Yahoo Finance response structure');
+    if (!json.chart?.result?.[0]) throw new Error('Invalid Yahoo Finance response');
+    const q = json.chart.result[0].indicators.quote[0];
+    if (!q || !q.close) throw new Error('No OHLCV data in response');
+
+    const closes = [], highs = [], lows = [], volumes = [];
+    for (let i = 0; i < q.close.length; i++) {
+      if (q.close[i] != null && q.high[i] != null && q.low[i] != null) {
+        closes.push(q.close[i]);
+        highs.push(q.high[i]);
+        lows.push(q.low[i]);
+        volumes.push(q.volume?.[i] || 0);
+      }
     }
-    const quotes = json.chart.result[0].indicators.quote[0];
-    if (!quotes || !quotes.close) {
-      throw new Error('No historical close array found');
-    }
-    const closes = quotes.close.filter(c => c !== null && c !== undefined);
-    if (closes.length === 0) {
-      throw new Error('Empty historical close data');
-    }
-    return closes;
+    if (closes.length === 0) throw new Error('Empty OHLCV data');
+    return { closes, highs, lows, volumes };
   } catch (err) {
-    console.warn(`[YahooFinance] Historical closes fetch failed for ${symbol}. Falling back to simulation: ${err.message}`);
-    return generateSimulatedCandles(symbol, days);
+    console.warn(`[YahooFinance] OHLCV fetch failed for ${symbol}, using simulation: ${err.message}`);
+    const closes = generateSimulatedCandles(symbol, days);
+    const highs   = closes.map(c => +(c * (1 + (Math.random() * 0.015))).toFixed(2));
+    const lows    = closes.map(c => +(c * (1 - (Math.random() * 0.015))).toFixed(2));
+    const volumes = closes.map(() => Math.floor(50000 + Math.random() * 600000));
+    return { closes, highs, lows, volumes };
   }
 }
+
+/**
+ * Backward-compatible wrapper — returns only closes array
+ */
+async function fetchHistoricalCloses(symbol, days = 150) {
+  const { closes } = await fetchHistoricalOHLCV(symbol, days);
+  return closes;
+}
+
 
 /**
  * Verify if a symbol is valid on Yahoo Finance by attempting to fetch its chart data.
@@ -350,4 +369,4 @@ async function fetchBatchLTP(symbols) {
   }
 }
 
-module.exports = { fetchLTP, fetchHistoricalCloses, verifySymbol, fetchIndexCandles, fetchBatchLTP };
+module.exports = { fetchLTP, fetchHistoricalCloses, fetchHistoricalOHLCV, verifySymbol, fetchIndexCandles, fetchBatchLTP };
