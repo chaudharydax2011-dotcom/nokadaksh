@@ -1,287 +1,238 @@
 // server.js
 require('dotenv').config();
 const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
-const fs      = require('fs');
-
-const { fetchHistoricalOHLCV, verifySymbol, fetchBatchLTP } = require('./growwClient');
-const { calcRSI, signalFor }                                 = require('./rsi');
-const { calcEMA, calcMACD, calcADX, calcScore, calcCompositeSignal } = require('./indicators');
+const cors = require('cors');
+const path = require('path');
+const { fetchLTP, fetchHistoricalCloses, verifySymbol, fetchBatchLTP } = require('./growwClient');
+const { calcRSI, signalFor } = require('./rsi');
+const fs = require('fs');
 
 const app = express();
-app.use(cors({ origin: '*', methods: ['GET','POST','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
-// Static routes
-app.get('/',             (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/health',       (req, res) => res.json({ status: 'ok' }));
-app.get('/manifest.json',(req, res) => res.sendFile(path.join(__dirname, 'manifest.json')));
-app.get('/sw.js',        (req, res) => res.sendFile(path.join(__dirname, 'sw.js')));
+// Serve index.html from root directory
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Serve PWA assets from root directory
+app.get('/manifest.json', (req, res) => {
+  res.sendFile(path.join(__dirname, 'manifest.json'));
+});
+
+app.get('/sw.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'sw.js'));
+});
+
+// Serve static files from the public folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-const PORT           = process.env.PORT || 4000;
+const PORT = process.env.PORT || 4000;
 const MIN_REFRESH_MS = parseInt(process.env.MIN_REFRESH_MS || '15000');
 
-// ── Symbol persistence ──────────────────────────────────────
 const SYMBOLS_FILE = path.join(__dirname, 'symbols.json');
 let SYMBOLS = [];
 const DEFAULT_SYMBOLS = [
-  'MAHKTECH','NIFTYBEES','CPSEETF','PHARMABEES','HNGSNGBEES','MON100',
-  'JUNIORBEES','ITBEES','HDFCSML250','PSUBNKBEES','FMCGIETF','BANKBEES',
-  'MASPTOP50','MOM100','MOM50','GOLDBEES','TNIDETF','SENSEXETF',
-  'SILVERBEES','MAKEINDIA','NIFTYQLITY','NV20IETF','SBIETFQLTY'
+  "MAHKTECH","NIFTYBEES","CPSEETF","PHARMABEES","HNGSNGBEES","MON100",
+  "JUNIORBEES","ITBEES","HDFCSML250","PSUBNKBEES","FMCGIETF","BANKBEES",
+  "MASPTOP50","MOM100","MOM50","GOLDBEES","TNIDETF","SENSEXETF",
+  "SILVERBEES","MAKEINDIA","NIFTYQLITY","NV20IETF","SBIETFQLTY"
 ];
 
 function loadSymbols() {
   try {
     if (fs.existsSync(SYMBOLS_FILE)) {
-      SYMBOLS = JSON.parse(fs.readFileSync(SYMBOLS_FILE, 'utf8'));
+      const data = fs.readFileSync(SYMBOLS_FILE, 'utf8');
+      SYMBOLS = JSON.parse(data);
     } else {
       SYMBOLS = [...DEFAULT_SYMBOLS];
       fs.writeFileSync(SYMBOLS_FILE, JSON.stringify(SYMBOLS, null, 2));
     }
   } catch (err) {
-    console.error('Error loading symbols:', err);
+    console.error("Error loading symbols:", err);
     SYMBOLS = [...DEFAULT_SYMBOLS];
   }
 }
 loadSymbols();
 
 function saveSymbols() {
-  try { fs.writeFileSync(SYMBOLS_FILE, JSON.stringify(SYMBOLS, null, 2)); }
-  catch (err) { console.error('Error saving symbols:', err); }
+  try {
+    fs.writeFileSync(SYMBOLS_FILE, JSON.stringify(SYMBOLS, null, 2));
+  } catch (err) {
+    console.error("Error saving symbols:", err);
+  }
 }
 
-// ── Cache ───────────────────────────────────────────────────
-// cache[symbol] = { closes, highs, lows, volumes, lastFetch, lastQuote }
-const cache = {};
+// ============================================================
+// RATE-LIMIT PROTECTION
+// In-memory cache: we only call Groww's real API at most once every
+// MIN_REFRESH_MS per symbol, no matter how many browser tabs/clients
+// are polling this backend. This is what stops you from burning your
+// daily API quota.
+// ============================================================
+const cache = {}; // symbol -> { closes: [...], lastFetch: timestamp, lastQuote: {...} }
 
-// ── Helper: check if two timestamps are on the same day in IST ──
-function isSameDayIST(ts1Ms, ts2Ms) {
-  const d1 = new Date(ts1Ms + 19800000); // UTC+5.5 hours offset
-  const d2 = new Date(ts2Ms + 19800000);
-  return d1.getUTCFullYear() === d2.getUTCFullYear() &&
-         d1.getUTCMonth()    === d2.getUTCMonth() &&
-         d1.getUTCDate()     === d2.getUTCDate();
-}
-
-// ── Helper: average of last N elements ──────────────────────
-function avgLast(arr, n) {
-  if (!arr || arr.length === 0) return 0;
-  const slice = arr.slice(-n).filter(v => v > 0);
-  return slice.length > 0 ? slice.reduce((a, b) => a + b, 0) / slice.length : 0;
-}
-
-// ── /api/quotes ─────────────────────────────────────────────
 app.get('/api/quotes', async (req, res) => {
   const period = parseInt(req.query.period || '14');
   if (isNaN(period) || period < 2 || period > 50) {
     return res.status(400).json({ error: 'Invalid RSI period. Must be between 2 and 50.' });
   }
+  let isAnyMock = false;
   const allSymbols = ['^NSEI', ...SYMBOLS];
 
   try {
-    // 1. Batch-fetch live LTP + change% for all symbols in 2 chunked requests
+    // Fetch live prices for all symbols in a single batch request
     const batchQuotes = await fetchBatchLTP(allSymbols);
-
-    const results  = [];
-    let niftyData  = null;
-    let isAnyMock  = false;
+    const results = [];
+    let niftyData = null;
 
     for (const symbol of allSymbols) {
       const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
 
-      // 2. Get OHLCV from cache or fetch fresh (5 minutes expiration for live accuracy)
-      let { closes = [], highs = [], lows = [], volumes = [], timestamps = [] } = cache[symbol] || {};
-      const cacheAgeMs = Date.now() - (cache[symbol]?.lastFetch || 0);
-      const needsRefresh = closes.length < 200 || cacheAgeMs > 5 * 60 * 1000;
-
-      if (needsRefresh) {
+      // Get historical closes from cache, fallback if missing
+      let closes = cache[symbol]?.closes;
+      if (!closes || closes.length < 50) {
         try {
-          const fresh = await fetchHistoricalOHLCV(symbol, 200);
-          closes = fresh.closes;
-          highs = fresh.highs;
-          lows = fresh.lows;
-          volumes = fresh.volumes;
-          timestamps = fresh.timestamps;
-        } catch (e) {
-          console.warn(`Failed to refresh OHLCV for ${symbol}, using cache fallback:`, e.message);
+          closes = await fetchHistoricalCloses(symbol, 150);
+        } catch (err) {
+          closes = [];
         }
       }
 
-      // 3. Append or update live LTP to a temporary calc copy
-      let calcCloses = [...closes];
-      let calcHighs  = [...highs];
-      let calcLows   = [...lows];
-      let calcVolumes = [...volumes];
-
-      if (quote.ltp != null && calcCloses.length > 0) {
-        const ltp = quote.ltp;
-        const lastTs = timestamps.length > 0 ? timestamps[timestamps.length - 1] : 0;
-        const isToday = isSameDayIST(lastTs * 1000, Date.now());
-
-        if (isToday) {
-          // Update today's existing candle in calc copy
-          calcCloses[calcCloses.length - 1] = ltp;
-          calcHighs[calcHighs.length - 1]   = Math.max(calcHighs[calcHighs.length - 1], ltp);
-          calcLows[calcLows.length - 1]     = Math.min(calcLows[calcLows.length - 1], ltp);
-          if (quote.volume) {
-            calcVolumes[calcVolumes.length - 1] = Math.max(calcVolumes[calcVolumes.length - 1], quote.volume);
-          }
+      // Create a temporary copy for calculations and append the live LTP (never mutate cached closes)
+      let calcCloses = [...(closes || [])];
+      if (quote.ltp != null) {
+        if (calcCloses.length === 0) {
+          calcCloses = [quote.ltp];
         } else {
-          // Append as a new candle
-          calcCloses.push(ltp);
-          calcHighs.push(ltp);
-          calcLows.push(ltp);
-          calcVolumes.push(quote.volume || 0);
+          calcCloses = [...calcCloses, quote.ltp].slice(-150);
         }
       }
 
-      // 4. Persist OHLCV to cache
+      // Save pure daily closes + latest quote metadata to cache
       const now = Date.now();
-
-      cache[symbol] = { closes, highs, lows, volumes, timestamps, lastFetch: now, lastQuote: quote };
+      cache[symbol] = { closes: closes || [], lastFetch: now, lastQuote: quote };
 
       if (quote.isMock) isAnyMock = true;
 
-      // ── Nifty index widget data (no RSI table row) ──
       if (symbol === '^NSEI') {
-        niftyData = { ltp: quote.ltp, changePct: quote.changePct, isMock: quote.isMock, closes: calcCloses.slice(-200) };
-        continue;
+        niftyData = {
+          ltp: quote.ltp,
+          changePct: quote.changePct,
+          isMock: quote.isMock,
+          closes: calcCloses
+        };
+      } else {
+        const rsi = calcRSI(calcCloses, period);
+        const sig = signalFor(rsi);
+        results.push({
+          symbol,
+          ltp: quote.ltp,
+          volume: quote.volume,
+          changePct: quote.changePct,
+          rsi,
+          signal: sig.label,
+          color: sig.color,
+          updatedAt: new Date(Date.now()).toISOString(),
+          isMock: quote.isMock,
+          closes: calcCloses
+        });
       }
-
-      // Slice temporary copies to 200 bars for calculation
-      const cCloses = calcCloses.slice(-200);
-      const cHighs  = calcHighs.slice(-200);
-      const cLows   = calcLows.slice(-200);
-      const cVols   = calcVolumes.slice(-200);
-
-      // 5. Calculate all indicators
-      const rsi  = calcRSI(cCloses, period);
-      const ema20 = calcEMA(cCloses, 20);
-      const ema50 = calcEMA(cCloses, 50);
-      const macd  = calcMACD(cCloses);
-
-      // For ADX: it should use completed bars only.
-      // If today is in the historical data, remove the last bar to use only fully completed sessions.
-      let adxHighs = [...highs];
-      let adxLows  = [...lows];
-      let adxCloses = [...closes];
-      if (timestamps.length > 0) {
-        const lastTs = timestamps[timestamps.length - 1];
-        if (isSameDayIST(lastTs * 1000, Date.now())) {
-          adxHighs.pop();
-          adxLows.pop();
-          adxCloses.pop();
-        }
-      }
-      const adx = calcADX(adxHighs.slice(-200), adxLows.slice(-200), adxCloses.slice(-200));
-
-      // Volume: last day from historical + 20-day avg
-      const lastVol = cVols.length > 0 ? cVols[cVols.length - 1] : null;
-      const avgVol  = avgLast(cVols, 20);
-
-      // Calculate rule-based Signal and composite Score
-      const sig = calcCompositeSignal({
-        rsi,
-        macd,
-        ema20,
-        ema50,
-        adx,
-        ltp: quote.ltp,
-        lastVolume: lastVol,
-        avgVolume: avgVol
-      });
-
-      const scoreData = calcScore({
-        rsi,
-        macd,
-        ema20,
-        ema50,
-        adx,
-        ltp:        quote.ltp,
-        lastVolume: lastVol,
-        avgVolume:  avgVol
-      });
-
-      results.push({
-        symbol,
-        ltp:        quote.ltp,
-        changePct:  quote.changePct,
-        volume:     lastVol,
-        avgVolume:  avgVol ? +avgVol.toFixed(0) : null,
-        rsi,
-        signal:     sig.label,
-        color:      sig.color,
-        ema20:      ema20 ? +ema20.toFixed(2) : null,
-        ema50:      ema50 ? +ema50.toFixed(2) : null,
-        ema20Signal: ema20 && quote.ltp ? (quote.ltp > ema20 ? 'ABOVE' : 'BELOW') : null,
-        ema50Signal: ema50 && quote.ltp ? (quote.ltp > ema50 ? 'ABOVE' : 'BELOW') : null,
-        macd,
-        adx,
-        score:      scoreData.score,
-        scoreLabel: scoreData.label,
-        scoreColor: scoreData.color,
-        updatedAt:  new Date(now).toISOString(),
-        isMock:     quote.isMock,
-        closes:     cCloses
-      });
     }
 
-    res.json({ data: results, minRefreshMs: MIN_REFRESH_MS, isMock: isAnyMock, nifty: niftyData });
+    res.json({
+      data: results,
+      minRefreshMs: MIN_REFRESH_MS,
+      isMock: isAnyMock,
+      nifty: niftyData
+    });
   } catch (err) {
-    console.error('[/api/quotes] Error:', err.message);
+    console.error('[/api/quotes] Unhandled error:', err.message);
     res.status(500).json({ error: 'Internal server error while fetching quotes.' });
   }
 });
 
-// ── Add symbol ───────────────────────────────────────────────
+// Add a symbol dynamically with validation
 app.post('/api/symbols', async (req, res) => {
   let symbol = req.body.symbol;
-  if (!symbol || typeof symbol !== 'string') return res.status(400).json({ error: 'Symbol parameter is required' });
+  if (!symbol || typeof symbol !== 'string') {
+    return res.status(400).json({ error: 'Symbol parameter is required' });
+  }
+
   symbol = symbol.trim().toUpperCase();
-  if (SYMBOLS.includes(symbol)) return res.status(400).json({ error: 'Symbol already exists' });
+
+  if (SYMBOLS.includes(symbol)) {
+    return res.status(400).json({ error: 'Symbol already exists' });
+  }
+
+  // Validate symbol on Yahoo Finance
   const isValid = await verifySymbol(symbol);
-  if (!isValid) return res.status(400).json({ error: 'Invalid NSE symbol. Please verify ticker code.' });
+  if (!isValid) {
+    return res.status(400).json({ error: 'Invalid NSE symbol. Please verify ticker code.' });
+  }
+
   SYMBOLS.push(symbol);
   saveSymbols();
   res.json({ success: true, symbols: SYMBOLS });
 });
 
-// ── Delete symbol ────────────────────────────────────────────
+// Delete a symbol dynamically
 app.delete('/api/symbols/:symbol', (req, res) => {
   const symbol = req.params.symbol.trim().toUpperCase();
   const idx = SYMBOLS.indexOf(symbol);
-  if (idx === -1) return res.status(404).json({ error: 'Symbol not found' });
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Symbol not found' });
+  }
+
   SYMBOLS.splice(idx, 1);
   saveSymbols();
+  
+  // Clean up cache entry
   delete cache[symbol];
+
   res.json({ success: true, symbols: SYMBOLS });
 });
 
-// ── Cache warm-up (on startup) ───────────────────────────────
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Helper to delay execution
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function warmUpCache() {
-  console.log('Warming up OHLCV cache...');
-  for (const symbol of ['^NSEI', ...SYMBOLS]) {
+  console.log("Warming up historical data cache...");
+  const allSymbols = ['^NSEI', ...SYMBOLS];
+  for (const symbol of allSymbols) {
     try {
-      if (!cache[symbol]?.closes || cache[symbol].closes.length < 50) {
-        console.log(`Seeding OHLCV for ${symbol}...`);
-        const ohlcv = await fetchHistoricalOHLCV(symbol, 200);
-        cache[symbol] = { ...ohlcv, lastFetch: Date.now(), lastQuote: { ltp: null, volume: null, changePct: null, isMock: true } };
+      let closes = cache[symbol]?.closes;
+      if (!closes || closes.length < 50) {
+        console.log(`Seeding history for ${symbol}...`);
+        closes = await fetchHistoricalCloses(symbol, 150);
+        cache[symbol] = {
+          closes,
+          lastFetch: Date.now(),
+          lastQuote: { ltp: null, volume: null, changePct: null, isMock: true }
+        };
         await sleep(150);
       }
     } catch (err) {
-      console.error(`Error seeding ${symbol}:`, err.message);
+      console.error(`Error seeding history for ${symbol}:`, err.message);
     }
   }
-  console.log('OHLCV cache warm-up complete.');
+  console.log("Historical data cache warm-up completed.");
 }
 
 app.listen(PORT, () => {
   console.log(`NSE RSI backend running on http://localhost:${PORT}`);
-  console.log(`Min refresh: ${MIN_REFRESH_MS}ms`);
+  console.log(`Rate-limit protection: min ${MIN_REFRESH_MS}ms between real API calls per symbol`);
+  
+  // Start background sequential cache warm-up
   warmUpCache();
 });
