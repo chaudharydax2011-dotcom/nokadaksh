@@ -106,9 +106,9 @@ app.get('/api/quotes', async (req, res) => {
         } else {
           const lastH = calcHighs[calcHighs.length - 1] || ltp;
           const lastL = calcLows[calcLows.length - 1] || ltp;
-          calcCloses = [...calcCloses, ltp].slice(-150);
-          calcHighs  = [...calcHighs, Math.max(lastH, ltp)].slice(-150);
-          calcLows   = [...calcLows,  Math.min(lastL, ltp)].slice(-150);
+          calcCloses = [...calcCloses, ltp].slice(-200);
+          calcHighs  = [...calcHighs, Math.max(lastH, ltp)].slice(-200);
+          calcLows   = [...calcLows,  Math.min(lastL, ltp)].slice(-200);
         }
       }
 

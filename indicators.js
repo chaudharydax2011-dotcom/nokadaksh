@@ -215,25 +215,15 @@ function calcScore(opts) {
     score += 10; // neutral
   }
 
-  // ── ADX: 20pts — strength × direction × DI spread ──
+  // ── ADX: 15pts — pure strength-based (user spec) ──
+  // < 20 = 0, 20-25 = +5, 25-35 = +10, > 35 = +15
   if (adxData) {
-    const bull     = adxData.direction === 'BULLISH';
-    const spread   = adxData.diSpread  || Math.abs(adxData.plusDI - adxData.minusDI);
-    // DI spread confidence: 0-1 scale (spread > 20 = high confidence)
-    const spreadConf = Math.min(spread / 20, 1);
-
-    if (adxData.adx >= 40) {
-      score += bull ? Math.min(20, 17 + spreadConf * 3) : Math.max(0, 2 - spreadConf * 2);
-    } else if (adxData.adx >= 25) {
-      score += bull ? Math.min(18, 13 + spreadConf * 5) : Math.max(0, 4 - spreadConf * 2);
-    } else if (adxData.adx >= 20) {
-      score += bull ? Math.min(14, 9 + spreadConf * 5) : Math.max(3, 6 - spreadConf * 3);
-    } else {
-      score += 7; // weak/ranging — neutral but slightly bearish
-    }
-  } else {
-    score += 8;
+    if      (adxData.adx > 35)  score += 15;
+    else if (adxData.adx >= 25) score += 10;
+    else if (adxData.adx >= 20) score += 5;
+    else                        score += 0;
   }
+  // no neutral fallback — ADX < 20 adds nothing (weak/ranging market)
 
   // ── Volume: 15pts ──
   if (lastVolume && avgVolume && avgVolume > 0) {
