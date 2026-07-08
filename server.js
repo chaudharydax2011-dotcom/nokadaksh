@@ -57,6 +57,15 @@ function saveSymbols() {
 // cache[symbol] = { closes, highs, lows, volumes, lastFetch, lastQuote }
 const cache = {};
 
+// ── Helper: check if two timestamps are on the same day in IST ──
+function isSameDayIST(ts1Ms, ts2Ms) {
+  const d1 = new Date(ts1Ms + 19800000); // UTC+5.5 hours offset
+  const d2 = new Date(ts2Ms + 19800000);
+  return d1.getUTCFullYear() === d2.getUTCFullYear() &&
+         d1.getUTCMonth()    === d2.getUTCMonth() &&
+         d1.getUTCDate()     === d2.getUTCDate();
+}
+
 // ── Helper: average of last N elements ──────────────────────
 function avgLast(arr, n) {
   if (!arr || arr.length === 0) return 0;
@@ -84,58 +93,87 @@ app.get('/api/quotes', async (req, res) => {
       const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
 
       // 2. Get OHLCV from cache or fetch fresh
-      let { closes = [], highs = [], lows = [], volumes = [] } = cache[symbol] || {};
+      let { closes = [], highs = [], lows = [], volumes = [], timestamps = [] } = cache[symbol] || {};
       const needsRefresh = closes.length < 50;
 
       if (needsRefresh) {
         try {
-          ({ closes, highs, lows, volumes } = await fetchHistoricalOHLCV(symbol, 200));
+          ({ closes, highs, lows, volumes, timestamps } = await fetchHistoricalOHLCV(symbol, 200));
         } catch (e) {
-          closes = []; highs = []; lows = []; volumes = [];
+          closes = []; highs = []; lows = []; volumes = []; timestamps = [];
         }
       }
 
-      // 3. Append live LTP to a temporary calc copy (never mutate cached arrays)
+      // 3. Append or update live LTP to a temporary calc copy
       let calcCloses = [...closes];
       let calcHighs  = [...highs];
       let calcLows   = [...lows];
-      if (quote.ltp != null) {
+      let calcVolumes = [...volumes];
+
+      if (quote.ltp != null && calcCloses.length > 0) {
         const ltp = quote.ltp;
-        if (calcCloses.length === 0) {
-          calcCloses = [ltp]; calcHighs = [ltp]; calcLows = [ltp];
+        const lastTs = timestamps.length > 0 ? timestamps[timestamps.length - 1] : 0;
+        const isToday = isSameDayIST(lastTs * 1000, Date.now());
+
+        if (isToday) {
+          // Update today's existing candle in calc copy
+          calcCloses[calcCloses.length - 1] = ltp;
+          calcHighs[calcHighs.length - 1]   = Math.max(calcHighs[calcHighs.length - 1], ltp);
+          calcLows[calcLows.length - 1]     = Math.min(calcLows[calcLows.length - 1], ltp);
+          if (quote.volume) {
+            calcVolumes[calcVolumes.length - 1] = Math.max(calcVolumes[calcVolumes.length - 1], quote.volume);
+          }
         } else {
-          const lastH = calcHighs[calcHighs.length - 1] || ltp;
-          const lastL = calcLows[calcLows.length - 1] || ltp;
-          calcCloses = [...calcCloses, ltp].slice(-200);
-          calcHighs  = [...calcHighs, Math.max(lastH, ltp)].slice(-200);
-          calcLows   = [...calcLows,  Math.min(lastL, ltp)].slice(-200);
+          // Append as a new candle
+          calcCloses.push(ltp);
+          calcHighs.push(ltp);
+          calcLows.push(ltp);
+          calcVolumes.push(quote.volume || 0);
         }
       }
 
       // 4. Persist OHLCV to cache
       const now = Date.now();
-      cache[symbol] = { closes, highs, lows, volumes, lastFetch: now, lastQuote: quote };
+      cache[symbol] = { closes, highs, lows, volumes, timestamps, lastFetch: now, lastQuote: quote };
 
       if (quote.isMock) isAnyMock = true;
 
       // ── Nifty index widget data (no RSI table row) ──
       if (symbol === '^NSEI') {
-        niftyData = { ltp: quote.ltp, changePct: quote.changePct, isMock: quote.isMock, closes: calcCloses };
+        niftyData = { ltp: quote.ltp, changePct: quote.changePct, isMock: quote.isMock, closes: calcCloses.slice(-200) };
         continue;
       }
 
+      // Slice temporary copies to 200 bars for calculation
+      const cCloses = calcCloses.slice(-200);
+      const cHighs  = calcHighs.slice(-200);
+      const cLows   = calcLows.slice(-200);
+      const cVols   = calcVolumes.slice(-200);
+
       // 5. Calculate all indicators
-      const rsi  = calcRSI(calcCloses, period);
-      // EMA and MACD use calcCloses (with live LTP appended)
-      const ema20 = calcEMA(calcCloses, 20);
-      const ema50 = calcEMA(calcCloses, 50);
-      const macd  = calcMACD(calcCloses);
-      // ADX uses ONLY completed historical bars — not the incomplete today bar
-      const adx   = calcADX(highs, lows, closes);
+      const rsi  = calcRSI(cCloses, period);
+      const ema20 = calcEMA(cCloses, 20);
+      const ema50 = calcEMA(cCloses, 50);
+      const macd  = calcMACD(cCloses);
+
+      // For ADX: it should use completed bars only.
+      // If today is in the historical data, remove the last bar to use only fully completed sessions.
+      let adxHighs = [...highs];
+      let adxLows  = [...lows];
+      let adxCloses = [...closes];
+      if (timestamps.length > 0) {
+        const lastTs = timestamps[timestamps.length - 1];
+        if (isSameDayIST(lastTs * 1000, Date.now())) {
+          adxHighs.pop();
+          adxLows.pop();
+          adxCloses.pop();
+        }
+      }
+      const adx = calcADX(adxHighs.slice(-200), adxLows.slice(-200), adxCloses.slice(-200));
 
       // Volume: last day from historical + 20-day avg
-      const lastVol = volumes.length > 0 ? volumes[volumes.length - 1] : null;
-      const avgVol  = avgLast(volumes, 20);
+      const lastVol = cVols.length > 0 ? cVols[cVols.length - 1] : null;
+      const avgVol  = avgLast(cVols, 20);
 
       // Calculate rule-based Signal and composite Score
       const sig = calcCompositeSignal({
@@ -180,7 +218,7 @@ app.get('/api/quotes', async (req, res) => {
         scoreColor: scoreData.color,
         updatedAt:  new Date(now).toISOString(),
         isMock:     quote.isMock,
-        closes:     calcCloses
+        closes:     cCloses
       });
     }
 

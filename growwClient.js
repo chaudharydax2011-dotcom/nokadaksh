@@ -152,7 +152,10 @@ async function fetchHistoricalOHLCV(symbol, days = 150) {
     const highs   = closes.map(c => +(c * (1 + (Math.random() * 0.015))).toFixed(2));
     const lows    = closes.map(c => +(c * (1 - (Math.random() * 0.015))).toFixed(2));
     const volumes = closes.map(() => Math.floor(50000 + Math.random() * 600000));
-    return { closes, highs, lows, volumes };
+    const timestamps = Array.from({ length: closes.length }, (_, i) => {
+      return Math.floor((Date.now() - (closes.length - 1 - i) * 24 * 3600 * 1000) / 1000);
+    });
+    return { closes, highs, lows, volumes, timestamps };
   }
 
   try {
@@ -166,26 +169,31 @@ async function fetchHistoricalOHLCV(symbol, days = 150) {
     const json = await res.json();
     if (!json.chart?.result?.[0]) throw new Error('Invalid Yahoo Finance response');
     const q = json.chart.result[0].indicators.quote[0];
+    const rawTimestamps = json.chart.result[0].timestamp || [];
     if (!q || !q.close) throw new Error('No OHLCV data in response');
 
-    const closes = [], highs = [], lows = [], volumes = [];
+    const closes = [], highs = [], lows = [], volumes = [], timestamps = [];
     for (let i = 0; i < q.close.length; i++) {
-      if (q.close[i] != null && q.high[i] != null && q.low[i] != null) {
+      if (q.close[i] != null && q.high[i] != null && q.low[i] != null && rawTimestamps[i] != null) {
         closes.push(q.close[i]);
         highs.push(q.high[i]);
         lows.push(q.low[i]);
         volumes.push(q.volume?.[i] || 0);
+        timestamps.push(rawTimestamps[i]);
       }
     }
     if (closes.length === 0) throw new Error('Empty OHLCV data');
-    return { closes, highs, lows, volumes };
+    return { closes, highs, lows, volumes, timestamps };
   } catch (err) {
     console.warn(`[YahooFinance] OHLCV fetch failed for ${symbol}, using simulation: ${err.message}`);
     const closes = generateSimulatedCandles(symbol, days);
     const highs   = closes.map(c => +(c * (1 + (Math.random() * 0.015))).toFixed(2));
     const lows    = closes.map(c => +(c * (1 - (Math.random() * 0.015))).toFixed(2));
     const volumes = closes.map(() => Math.floor(50000 + Math.random() * 600000));
-    return { closes, highs, lows, volumes };
+    const timestamps = Array.from({ length: closes.length }, (_, i) => {
+      return Math.floor((Date.now() - (closes.length - 1 - i) * 24 * 3600 * 1000) / 1000);
+    });
+    return { closes, highs, lows, volumes, timestamps };
   }
 }
 
