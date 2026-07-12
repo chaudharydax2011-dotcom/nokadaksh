@@ -968,7 +968,8 @@ if (BACKEND_URL.startsWith('__BACKEND_URL')) {
 let timer = null;
 let cachedData = [];
 let isFetching = false;
-let notifiedStocks = new Set();
+let notifiedStrongBuys = new Set();
+let notifiedStrongSells = new Set();
 let notificationsEnabled = false;
 
 function showMessage(msg, isError = true) {
@@ -1085,7 +1086,7 @@ async function tick(showSpinner = false) {
     cachedData = json.data;
     renderAll(json.data);
     renderNiftyWidget(json.nifty);
-    checkStrongBuyAlerts(json.data);
+    checkRsiAlerts(json.data);
   } catch (err) {
     updateConnectionStatus(false);
     const extraMsg = BACKEND_URL.includes('localhost')
@@ -1649,25 +1650,40 @@ function fallbackNotification(title, options) {
   }
 }
 
-function checkStrongBuyAlerts(data) {
+function checkRsiAlerts(data) {
   if (!notificationsEnabled) return;
   if (!window.Notification || Notification.permission !== 'granted') return;
   const currentStrongBuys = new Set();
+  const currentStrongSells = new Set();
   data.forEach(r => {
-    if (r.rsi !== null && r.rsi < 30) {
-      currentStrongBuys.add(r.symbol);
-      if (!notifiedStocks.has(r.symbol)) {
-        showBrowserNotification(`Strong Buy Alert: ${r.symbol}`, `RSI has dropped to ${r.rsi.toFixed(2)} (Strong Buy category). LTP: ₹${r.ltp ? r.ltp.toFixed(2) : '--'}`);
-        notifiedStocks.add(r.symbol);
+    if (r.rsi !== null) {
+      if (r.rsi < 30) {
+        currentStrongBuys.add(r.symbol);
+        if (!notifiedStrongBuys.has(r.symbol)) {
+          showBrowserNotification(`Strong Buy Alert: ${r.symbol}`, `RSI has dropped to ${r.rsi.toFixed(2)} (Strong Buy category). LTP: ₹${r.ltp ? r.ltp.toFixed(2) : '--'}`);
+          notifiedStrongBuys.add(r.symbol);
+        }
+      } else if (r.rsi > 70) {
+        currentStrongSells.add(r.symbol);
+        if (!notifiedStrongSells.has(r.symbol)) {
+          showBrowserNotification(`Strong Sell Alert: ${r.symbol}`, `RSI has crossed ${r.rsi.toFixed(2)} (Strong Sell category). LTP: ₹${r.ltp ? r.ltp.toFixed(2) : '--'}`);
+          notifiedStrongSells.add(r.symbol);
+        }
       }
     }
   });
-  for (const sym of notifiedStocks) {
+  for (const sym of notifiedStrongBuys) {
     if (!currentStrongBuys.has(sym)) {
-      notifiedStocks.delete(sym);
+      notifiedStrongBuys.delete(sym);
+    }
+  }
+  for (const sym of notifiedStrongSells) {
+    if (!currentStrongSells.has(sym)) {
+      notifiedStrongSells.delete(sym);
     }
   }
 }
+
 
 if (window.Notification && Notification.permission === 'granted') {
   notificationsEnabled = true;
