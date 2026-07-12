@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nse-rsi-v2';
+const CACHE_NAME = 'nse-rsi-v3';
 const ASSETS = [
   '/',
   '/index.html',
