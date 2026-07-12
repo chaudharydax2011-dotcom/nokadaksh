@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nse-rsi-v3';
+const CACHE_NAME = 'nse-rsi-v4';
 const ASSETS = [
   '/',
   '/index.html',
@@ -66,3 +66,24 @@ self.addEventListener('fetch', (e) => {
     );
   }
 });
+
+// Handle notification clicks (focus window if open, otherwise open a new window)
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const urlToOpen = e.notification.data?.url || self.registration.scope || '/';
+  
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (let i = 0; i < windowClients.length; i++) {
+        const client = windowClients[i];
+        if (client.url === urlToOpen && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
+  );
+});
+

@@ -1088,7 +1088,10 @@ async function tick(showSpinner = false) {
     checkStrongBuyAlerts(json.data);
   } catch (err) {
     updateConnectionStatus(false);
-    showMessage(`Cannot reach backend at ${BACKEND_URL}. Ensure "node server.js" is running. (${err.message})`, true);
+    const extraMsg = BACKEND_URL.includes('localhost')
+      ? 'Ensure "node server.js" is running.'
+      : 'Render server might be starting up (waking up from sleep, takes ~50s). Please wait.';
+    showMessage(`Cannot reach backend at ${BACKEND_URL}. ${extraMsg} (${err.message})`, true);
     if (sourceLabel) {
       sourceLabel.textContent = 'Data Mode: OFFLINE';
       sourceLabel.style.color = 'var(--red)';
@@ -1585,7 +1588,7 @@ function updateNotifyBtnUI() {
 
 function toggleNotifications() {
   if (!window.Notification) {
-    showMessage('Desktop notifications are not supported in this browser.', true);
+    showMessage('Notifications are not supported in this browser.', true);
     return;
   }
   if (Notification.permission === 'denied') {
@@ -1603,20 +1606,47 @@ function toggleNotifications() {
       notificationsEnabled = true;
       updateNotifyBtnUI();
       showMessage('Notifications Enabled!', false);
-      try {
-        new Notification('RSI Alerts Activated', {
-          body: 'Alerts are active for stocks entering STRONG BUY category (<30 RSI)!',
-          icon: '/favicon.ico'
-        });
-      } catch (e) {
-        console.error(e);
-      }
+      showBrowserNotification('RSI Alerts Activated', 'Alerts are active for stocks entering STRONG BUY category (<30 RSI)!');
     } else {
       notificationsEnabled = false;
       updateNotifyBtnUI();
       showMessage('Notification permission denied.', true);
     }
   });
+}
+
+function showBrowserNotification(title, body) {
+  const options = {
+    body: body,
+    icon: '/favicon.ico',
+    badge: '/favicon.ico',
+    vibrate: [100, 50, 100],
+    data: {
+      url: window.location.href
+    }
+  };
+
+  // Check if Service Worker is active and use showNotification (required for mobile support)
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(title, options);
+    }).catch(err => {
+      console.warn('SW notification failed, falling back to desktop API:', err);
+      fallbackNotification(title, options);
+    });
+  } else {
+    fallbackNotification(title, options);
+  }
+}
+
+function fallbackNotification(title, options) {
+  try {
+    if (window.Notification && Notification.permission === 'granted') {
+      new Notification(title, options);
+    }
+  } catch (e) {
+    console.error('Notification constructor failed:', e);
+  }
 }
 
 function checkStrongBuyAlerts(data) {
@@ -1627,15 +1657,8 @@ function checkStrongBuyAlerts(data) {
     if (r.rsi !== null && r.rsi < 30) {
       currentStrongBuys.add(r.symbol);
       if (!notifiedStocks.has(r.symbol)) {
-        try {
-          new Notification(`Strong Buy Alert: ${r.symbol}`, {
-            body: `RSI has dropped to ${r.rsi.toFixed(2)} (Strong Buy category). LTP: ₹${r.ltp ? r.ltp.toFixed(2) : '--'}`,
-            icon: '/favicon.ico'
-          });
-          notifiedStocks.add(r.symbol);
-        } catch (e) {
-          console.error(e);
-        }
+        showBrowserNotification(`Strong Buy Alert: ${r.symbol}`, `RSI has dropped to ${r.rsi.toFixed(2)} (Strong Buy category). LTP: ₹${r.ltp ? r.ltp.toFixed(2) : '--'}`);
+        notifiedStocks.add(r.symbol);
       }
     }
   });
@@ -1650,6 +1673,7 @@ if (window.Notification && Notification.permission === 'granted') {
   notificationsEnabled = true;
   setTimeout(updateNotifyBtnUI, 100);
 }
+
 
 initBackendConnection();
 
