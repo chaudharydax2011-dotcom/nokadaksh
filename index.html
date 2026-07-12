@@ -337,6 +337,15 @@ if ('serviceWorker' in navigator) {
   .delete-btn:hover {
     background: rgba(239, 68, 68, 0.15);
   }
+  .notify-btn:hover {
+    background: var(--border) !important;
+    color: #fff !important;
+  }
+  .notify-btn.enabled {
+    background: rgba(34, 197, 94, 0.15) !important;
+    border-color: rgba(34, 197, 94, 0.3) !important;
+    color: #22c55e !important;
+  }
 
   /* Lowest RSI Sidebar Panel */
   .lowest-table {
@@ -725,9 +734,12 @@ if ('serviceWorker' in navigator) {
 
 <div class="wrap">
   <!-- Header Banner -->
-  <div class="header">
+  <div class="header" style="flex-wrap: wrap;">
     <h1>NSE STOCKS RSI SIGNAL SHEET</h1>
     <span class="live-badge">LIVE</span>
+    <button id="notifyToggleBtn" class="notify-btn" onclick="toggleNotifications()" style="margin-left: 10px; background: #16273a; border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; padding: 4px 10px; border-radius: 4px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s; height: fit-content; margin-top: 2px;">
+      <span>🔔</span> <span id="notifyToggleText">Alerts: OFF</span>
+    </button>
   </div>
 
   <!-- Mobile Tab Navigation Bar -->
@@ -956,6 +968,8 @@ if (BACKEND_URL.startsWith('__BACKEND_URL')) {
 let timer = null;
 let cachedData = [];
 let isFetching = false;
+let notifiedStocks = new Set();
+let notificationsEnabled = false;
 
 function showMessage(msg, isError = true) {
   const banner = document.getElementById('errBanner');
@@ -1071,6 +1085,7 @@ async function tick(showSpinner = false) {
     cachedData = json.data;
     renderAll(json.data);
     renderNiftyWidget(json.nifty);
+    checkStrongBuyAlerts(json.data);
   } catch (err) {
     updateConnectionStatus(false);
     showMessage(`Cannot reach backend at ${BACKEND_URL}. Ensure "node server.js" is running. (${err.message})`, true);
@@ -1555,7 +1570,89 @@ window.addEventListener('resize', () => {
   }
 });
 
+function updateNotifyBtnUI() {
+  const btn = document.getElementById('notifyToggleBtn');
+  const textEl = document.getElementById('notifyToggleText');
+  if (!btn || !textEl) return;
+  if (notificationsEnabled) {
+    btn.classList.add('enabled');
+    textEl.textContent = 'Alerts: ON';
+  } else {
+    btn.classList.remove('enabled');
+    textEl.textContent = 'Alerts: OFF';
+  }
+}
+
+function toggleNotifications() {
+  if (!window.Notification) {
+    showMessage('Desktop notifications are not supported in this browser.', true);
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    showMessage('Notification permission is blocked. Please enable it in browser site settings.', true);
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    notificationsEnabled = !notificationsEnabled;
+    updateNotifyBtnUI();
+    showMessage(notificationsEnabled ? 'Notifications Enabled!' : 'Notifications Disabled!', false);
+    return;
+  }
+  Notification.requestPermission().then(permission => {
+    if (permission === 'granted') {
+      notificationsEnabled = true;
+      updateNotifyBtnUI();
+      showMessage('Notifications Enabled!', false);
+      try {
+        new Notification('RSI Alerts Activated', {
+          body: 'Alerts are active for stocks entering STRONG BUY category (<30 RSI)!',
+          icon: '/favicon.ico'
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      notificationsEnabled = false;
+      updateNotifyBtnUI();
+      showMessage('Notification permission denied.', true);
+    }
+  });
+}
+
+function checkStrongBuyAlerts(data) {
+  if (!notificationsEnabled) return;
+  if (!window.Notification || Notification.permission !== 'granted') return;
+  const currentStrongBuys = new Set();
+  data.forEach(r => {
+    if (r.rsi !== null && r.rsi < 30) {
+      currentStrongBuys.add(r.symbol);
+      if (!notifiedStocks.has(r.symbol)) {
+        try {
+          new Notification(`Strong Buy Alert: ${r.symbol}`, {
+            body: `RSI has dropped to ${r.rsi.toFixed(2)} (Strong Buy category). LTP: ₹${r.ltp ? r.ltp.toFixed(2) : '--'}`,
+            icon: '/favicon.ico'
+          });
+          notifiedStocks.add(r.symbol);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+  });
+  for (const sym of notifiedStocks) {
+    if (!currentStrongBuys.has(sym)) {
+      notifiedStocks.delete(sym);
+    }
+  }
+}
+
+if (window.Notification && Notification.permission === 'granted') {
+  notificationsEnabled = true;
+  setTimeout(updateNotifyBtnUI, 100);
+}
+
 initBackendConnection();
+
 </script>
 </body>
 </html>
