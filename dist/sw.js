@@ -1,5 +1,7 @@
-const CACHE_NAME = 'nse-rsi-v9';
+const CACHE_NAME = 'nse-rsi-v8';
 const ASSETS = [
+  '/',
+  '/index.html',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
 ];
 
@@ -35,21 +37,34 @@ self.addEventListener('fetch', (e) => {
 
   const url = new URL(e.request.url);
 
-  // Bypass API calls and HTML/root pages entirely - let them load directly from the network!
-  if (url.pathname.includes('/api/') || url.pathname === '/' || url.pathname.endsWith('.html')) {
+  // Bypass API calls entirely - do not cache dynamic backend quotes data!
+  if (url.pathname.includes('/api/')) {
     return;
   }
 
-  // Cache-First fallback for static fonts or static assets
-  e.respondWith(
-    caches.match(e.request).then((cachedResponse) => {
-      return cachedResponse || fetch(e.request).then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
-        return response;
-      });
-    })
-  );
+  // Network-First for root/HTML, Cache-First for static fonts/assets
+  if (url.pathname === '/' || url.pathname.endsWith('.html')) {
+    e.respondWith(
+      fetch(e.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(e.request))
+    );
+  } else {
+    // Cache-First fallback for static fonts or static assets
+    e.respondWith(
+      caches.match(e.request).then((cachedResponse) => {
+        return cachedResponse || fetch(e.request).then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+          return response;
+        });
+      })
+    );
+  }
 });
 
 // Handle notification clicks (focus window if open, otherwise open a new window)
