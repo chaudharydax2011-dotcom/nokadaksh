@@ -854,6 +854,7 @@ if ('serviceWorker' in navigator) {
             <th style="width: 50px;">No.</th>
             <th>NSE Code</th>
             <th>RSI (14)</th>
+            <th>ADX (14)</th>
             <th>LTP</th>
             <th>Signal</th>
             <th style="width: 110px;">Signal Color</th>
@@ -1317,7 +1318,7 @@ function renderDetailedChart(closes, changePct) {
 function renderMainTable(rows) {
   const tbody = document.getElementById('tableBody');
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No stocks in list. Add a symbol above!</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">No stocks in list. Add a symbol above!</td></tr>`;
     return;
   }
   
@@ -1326,6 +1327,7 @@ function renderMainTable(rows) {
       <td data-label="No.">${i + 1}</td>
       <td data-label="NSE Code" class="symbol-code">NSE: ${r.symbol}</td>
       <td data-label="RSI (14)" style="font-weight: 500;">${r.rsi !== null ? r.rsi.toFixed(2) : '—'}</td>
+      <td data-label="ADX (14)" style="font-weight: 600; color: ${r.adxColor || 'var(--text-muted)'};">${r.adxText || '—'}</td>
       <td data-label="LTP" style="font-weight: 500;">${r.ltp !== null ? '₹' + r.ltp.toFixed(2) : '—'}</td>
       <td data-label="Signal">
         <span class="sig-label">

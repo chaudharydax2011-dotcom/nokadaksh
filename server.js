@@ -3,8 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { fetchLTP, fetchHistoricalCloses, verifySymbol, fetchBatchLTP } = require('./growwClient');
+const { fetchLTP, fetchHistoricalCloses, fetchHistoricalOHLCV, verifySymbol, fetchBatchLTP } = require('./growwClient');
 const { calcRSI, signalFor } = require('./rsi');
+const { calcADX } = require('./adx');
 const fs = require('fs');
 
 const app = express();
@@ -103,13 +104,23 @@ app.get('/api/quotes', async (req, res) => {
     for (const symbol of allSymbols) {
       const quote = batchQuotes[symbol] || { ltp: null, volume: null, changePct: null, isMock: true };
 
-      // Get historical closes from cache, fallback if missing
-      let closes = cache[symbol]?.closes;
-      if (!closes || closes.length < 50) {
+      // Get historical OHLCV from cache, fallback if missing (with 5 min refresh)
+      let { closes = [], highs = [], lows = [], volumes = [] } = cache[symbol] || {};
+      const cacheAgeMs = Date.now() - (cache[symbol]?.lastFetch || 0);
+      const needsRefresh = closes.length < 50 || cacheAgeMs > 5 * 60 * 1000;
+
+      if (needsRefresh) {
         try {
-          closes = await fetchHistoricalCloses(symbol, 150);
+          const ohlcv = await fetchHistoricalOHLCV(symbol, 200);
+          closes = ohlcv.closes;
+          highs = ohlcv.highs;
+          lows = ohlcv.lows;
+          volumes = ohlcv.volumes;
         } catch (err) {
-          closes = [];
+          // preserve cache fallback if fails
+          if (closes.length === 0) {
+            closes = []; highs = []; lows = []; volumes = [];
+          }
         }
       }
 
@@ -119,15 +130,29 @@ app.get('/api/quotes', async (req, res) => {
         if (calcCloses.length === 0) {
           calcCloses = [quote.ltp];
         } else {
-          calcCloses = [...calcCloses, quote.ltp].slice(-150);
+          calcCloses = [...calcCloses, quote.ltp].slice(-200);
         }
       }
 
-      // Save pure daily closes + latest quote metadata to cache
+      // Save pure daily OHLCV + latest quote metadata to cache
       const now = Date.now();
-      cache[symbol] = { closes: closes || [], lastFetch: now, lastQuote: quote };
+      cache[symbol] = { closes, highs, lows, volumes, lastFetch: now, lastQuote: quote };
 
       if (quote.isMock) isAnyMock = true;
+
+      // Calculate ADX on historical candles to ensure 100% accuracy
+      let adxText = '—';
+      let adxColor = 'var(--text-muted)';
+      const adxVal = calcADX(highs, lows, closes, 14);
+      if (adxVal !== null) {
+        if (adxVal > 25) {
+          adxText = `▲ BULLISH (${adxVal.toFixed(2)})`;
+          adxColor = '#00ff66';
+        } else {
+          adxText = `▼ BEARISH (${adxVal.toFixed(2)})`;
+          adxColor = '#ef4444';
+        }
+      }
 
       if (symbol === '^NSEI') {
         niftyData = {
@@ -147,6 +172,8 @@ app.get('/api/quotes', async (req, res) => {
           rsi,
           signal: sig.label,
           color: sig.color,
+          adxText,
+          adxColor,
           updatedAt: new Date(Date.now()).toISOString(),
           isMock: quote.isMock,
           closes: calcCloses
@@ -218,9 +245,12 @@ async function warmUpCache() {
       let closes = cache[symbol]?.closes;
       if (!closes || closes.length < 50) {
         console.log(`Seeding history for ${symbol}...`);
-        closes = await fetchHistoricalCloses(symbol, 150);
+        const ohlcv = await fetchHistoricalOHLCV(symbol, 200);
         cache[symbol] = {
-          closes,
+          closes: ohlcv.closes,
+          highs: ohlcv.highs,
+          lows: ohlcv.lows,
+          volumes: ohlcv.volumes,
           lastFetch: Date.now(),
           lastQuote: { ltp: null, volume: null, changePct: null, isMock: true }
         };
