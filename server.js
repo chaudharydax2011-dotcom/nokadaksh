@@ -88,7 +88,11 @@ app.get('/api/quotes', async (req, res) => {
     return res.status(400).json({ error: 'Invalid RSI period. Must be between 2 and 50.' });
   }
   let isAnyMock = false;
-  const allSymbols = ['^NSEI', ...SYMBOLS];
+  let requestedSymbols = SYMBOLS;
+  if (req.query.symbols) {
+    requestedSymbols = req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  }
+  const allSymbols = ['^NSEI', ...requestedSymbols];
 
   try {
     // Fetch live prices for all symbols in a single batch request

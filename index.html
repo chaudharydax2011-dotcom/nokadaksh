@@ -972,6 +972,38 @@ let notifiedStrongBuys = new Set();
 let notifiedStrongSells = new Set();
 let notificationsEnabled = false;
 
+// Custom Symbols persistence in browser localStorage
+const DEFAULT_PERSISTENT_SYMBOLS = [
+  "MAHKTECH","NIFTYBEES","CPSEETF","PHARMABEES","HNGSNGBEES","MON100",
+  "JUNIORBEES","ITBEES","HDFCSML250","PSUBNKBEES","FMCGIETF","BANKBEES",
+  "MASPTOP50","MOM100","MOM50","GOLDBEES","TNIDETF","SENSEXETF",
+  "SILVERBEES","MAKEINDIA","NIFTYQLITY","NV20IETF","SBIETFQLTY"
+];
+
+function getLocalSymbols() {
+  try {
+    const data = localStorage.getItem('user_symbols');
+    if (data) {
+      const arr = JSON.parse(data);
+      if (Array.isArray(arr) && arr.length > 0) {
+        return arr;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading localStorage symbols:', e);
+  }
+  localStorage.setItem('user_symbols', JSON.stringify(DEFAULT_PERSISTENT_SYMBOLS));
+  return [...DEFAULT_PERSISTENT_SYMBOLS];
+}
+
+function saveLocalSymbols(arr) {
+  try {
+    localStorage.setItem('user_symbols', JSON.stringify(arr));
+  } catch (e) {
+    console.error('Error saving localStorage symbols:', e);
+  }
+}
+
 function showMessage(msg, isError = true) {
   const banner = document.getElementById('errBanner');
   const txt = document.getElementById('errText');
@@ -1063,8 +1095,10 @@ async function tick(showSpinner = false) {
   const banner = document.getElementById('errBanner');
   const sourceLabel = document.getElementById('sourceLabel');
   try {
-    const res = await fetch(`${BACKEND_URL}/api/quotes?period=${period}`);
+    const symbols = getLocalSymbols();
+    const res = await fetch(`${BACKEND_URL}/api/quotes?period=${period}&symbols=${symbols.join(',')}`);
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+
     const json = await res.json();
     
     updateConnectionStatus(true);
@@ -1465,10 +1499,17 @@ async function addSymbol() {
       throw new Error(json.error || 'Failed to add symbol');
     }
 
+    const symbols = getLocalSymbols();
+    if (!symbols.includes(symbol)) {
+      symbols.push(symbol);
+      saveLocalSymbols(symbols);
+    }
+
     input.value = '';
     showMessage(`Successfully added ${symbol}!`, false);
     // Small delay to let isFetching lock reset before re-fetching
     setTimeout(() => tick(), 300);
+
   } catch (err) {
     showMessage(err.message, true);
   } finally {
@@ -1492,9 +1533,14 @@ async function deleteSymbol(symbol) {
       throw new Error(json.error || 'Failed to delete symbol');
     }
 
+    let symbols = getLocalSymbols();
+    symbols = symbols.filter(s => s !== symbol);
+    saveLocalSymbols(symbols);
+
     showMessage(`Successfully removed ${symbol}.`, false);
     // Small delay to let isFetching lock reset before re-fetching
     setTimeout(() => tick(), 300);
+
   } catch (err) {
     showMessage(err.message, true);
   }
