@@ -11,7 +11,7 @@ if (!fs.existsSync(distDir)) {
 let indexContent = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 
 // Replace placeholder with production backend URL (ensuring it doesn't have trailing slash)
-let backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
+let backendUrl = process.env.BACKEND_URL || 'https://nokadaksh.onrender.com';
 if (backendUrl.endsWith('/')) {
   backendUrl = backendUrl.slice(0, -1);
 }
